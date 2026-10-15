@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Concurrent Search Engine</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.6rem; }
+    .status { display: flex; gap: 1rem; margin: 1.5rem 0; }
+    .card { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+    .label { font-size: .85rem; color: #666; }
+    .value { font-size: 1.3rem; font-weight: 600; margin-top: .3rem; }
+    .ok { color: #1a7f37; } .fail { color: #cf222e; } .pending { color: #9a6700; }
+    button { padding: .5rem 1rem; cursor: pointer; }
+    code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Concurrent Search Engine</h1>
+  <p>Web UI placeholder. Search and the pipeline visualization will be added later.</p>
+
+  <div class="status">
+    <div class="card">
+      <div class="label">Search server</div>
+      <div id="server" class="value pending">checking…</div>
+    </div>
+    <div class="card">
+      <div class="label">Ollama LLM</div>
+      <div id="ollama" class="value pending">checking…</div>
+    </div>
+  </div>
+
+  <button id="refresh">Refresh</button>
+  <p class="label">Source: <code>GET /api/health</code></p>
+
+  <script>
+    function set(id, ok, text) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = 'value ' + (ok ? 'ok' : 'fail');
+    }
+
+    async function checkHealth() {
+      try {
+        const res = await fetch('/api/health');
+        const body = await res.json();
+        set('server', res.ok && body.status === 'ok', res.ok ? 'OK' : 'HTTP ' + res.status);
+        set('ollama', body.ollama === true, body.ollama ? 'available' : 'unavailable');
+      } catch (e) {
+        set('server', false, 'unreachable');
+        set('ollama', false, 'unknown');
+      }
+    }
+
+    document.getElementById('refresh').addEventListener('click', checkHealth);
+    checkHealth();
+  </script>
+</body>
+</html>

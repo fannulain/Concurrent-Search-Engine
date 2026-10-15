@@ -73,18 +73,18 @@ See Section 11 (Glossary). Primary references:
 | CLI client (Python) | Command-line search via REST and/or WebSocket |
 
 ### 4.2 UML Diagrams
-All diagrams are stored in `docs/` as PlantUML sources (`*.md`) with rendered `*.svg`:
+All diagrams are stored in `docs/diagrams/`: PlantUML sources in `md/`, rendered images in `svg/`:
 
 | Diagram | File |
 |---|---|
-| Use case | [`uml_use_case_diagram`](../docs/uml_use_case_diagram.md) |
-| Class | [`uml_class_diagram`](../docs/uml_class_diagram.md) |
-| Sequence — UC-1 Health Check | [`sequence_diagram_health`](../docs/sequence_diagram_health.md) |
-| Sequence — UC-2 Build Index | [`sequence_diagram_inverted_index`](../docs/sequence_diagram_inverted_index.md) |
-| Sequence — UC-3 Get Statistics | [`sequence_diagram_stats`](../docs/sequence_diagram_stats.md) |
-| Sequence — UC-4 REST Keyword Search | [`sequence_diagram_keyword_search`](../docs/sequence_diagram_keyword_search.md) |
-| Sequence — UC-5 WebSocket Streaming Search | [`sequence_diagram_websocket_pipeline`](../docs/sequence_diagram_websocket_pipeline.md) |
-| Deployment (Docker Compose topology) | [`uml_deployment_diagram`](../docs/uml_deployment_diagram.md) |
+| Use case | [`uml_use_case_diagram`](../docs/diagrams/md/uml_use_case_diagram.md) |
+| Class | [`uml_class_diagram`](../docs/diagrams/md/uml_class_diagram.md) |
+| Sequence — UC-1 Health Check | [`sequence_diagram_health`](../docs/diagrams/md/sequence_diagram_health.md) |
+| Sequence — UC-2 Build Index | [`sequence_diagram_inverted_index`](../docs/diagrams/md/sequence_diagram_inverted_index.md) |
+| Sequence — UC-3 Get Statistics | [`sequence_diagram_stats`](../docs/diagrams/md/sequence_diagram_stats.md) |
+| Sequence — UC-4 REST Keyword Search | [`sequence_diagram_keyword_search`](../docs/diagrams/md/sequence_diagram_keyword_search.md) |
+| Sequence — UC-5 WebSocket Streaming Search | [`sequence_diagram_websocket_pipeline`](../docs/diagrams/md/sequence_diagram_websocket_pipeline.md) |
+| Deployment (Docker Compose topology) | [`uml_deployment_diagram`](../docs/diagrams/md/uml_deployment_diagram.md) |
 
 ---
 

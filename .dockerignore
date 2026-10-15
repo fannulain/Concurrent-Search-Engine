@@ -1,0 +1,12 @@
+.git
+.github
+.vscode
+.idea
+build
+cmake-build-*
+data
+docs
+spec
+web
+*.pdf
+*.md
