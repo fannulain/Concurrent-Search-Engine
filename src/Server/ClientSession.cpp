@@ -21,7 +21,7 @@ bool isBenignError(const beast::error_code& ec)
 
 } // namespace
 
-ClientSession::ClientSession(tcp::socket&& socket, const RequestHandler& requestHandler)
+ClientSession::ClientSession(tcp::socket&& socket, RequestHandler& requestHandler)
     : stream(std::move(socket)), requestHandler(requestHandler)
 {
 }

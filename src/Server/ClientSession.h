@@ -14,7 +14,7 @@ private:
     boost::beast::flat_buffer buffer;
     HttpRequest request;
     HttpResponse response;
-    const RequestHandler& requestHandler;
+    RequestHandler& requestHandler;
 
     void doRead();
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
@@ -22,7 +22,7 @@ private:
     void doClose();
 
 public:
-    ClientSession(boost::asio::ip::tcp::socket&& socket, const RequestHandler& requestHandler);
+    ClientSession(boost::asio::ip::tcp::socket&& socket, RequestHandler& requestHandler);
 
     void start();
 };
