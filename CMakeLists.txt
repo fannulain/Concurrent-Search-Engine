@@ -28,6 +28,7 @@ add_library(cse_core STATIC
   src/Config/Config.cpp
   src/Index/ConcurrentInvertedIndex.cpp
   src/Index/DocumentStore.cpp
+  src/Index/IndexerService.cpp
   src/Index/Tokenizer.cpp
   src/Ollama/OllamaService.cpp
   src/Server/ClientSession.cpp
