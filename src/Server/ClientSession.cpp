@@ -286,6 +286,8 @@ void ClientSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*
         return;
     }
 
+    stream.expires_never();
+
     if (websocket::is_upgrade(request))
     {
         if (stripQueryString(request.target()) != "/ws/search")
@@ -296,6 +298,7 @@ void ClientSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*
             response.keep_alive(false);
             response.body() = json{{"error", "WebSocket endpoint not found"}}.dump();
             response.prepare_payload();
+            stream.expires_after(IDLE_TIMEOUT);
             http::async_write(stream, response,
                               beast::bind_front_handler(&ClientSession::onWrite, shared_from_this(), false));
             return;
@@ -307,6 +310,7 @@ void ClientSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*
 
     response = requestHandler.handle(request);
     const bool keepAlive = response.keep_alive();
+    stream.expires_after(IDLE_TIMEOUT);
     http::async_write(stream, response,
                       beast::bind_front_handler(&ClientSession::onWrite, shared_from_this(), keepAlive));
 }
