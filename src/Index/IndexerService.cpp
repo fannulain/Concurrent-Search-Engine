@@ -114,6 +114,7 @@ void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer
     const std::string filePathStr = filePath.string();
 
     std::unordered_map<std::string, uint32_t> termFreq;
+    termFreq.reserve(512);
     size_t pos = startOffset;
     size_t chunkNo = 0;
 
@@ -241,6 +242,8 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         }
         pool.stop(true);
     }
+
+    snapshot->index.shrinkToFit();
 
     const auto endTime = std::chrono::steady_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();

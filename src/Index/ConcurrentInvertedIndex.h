@@ -39,6 +39,7 @@ public:
 
     void addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq);
     std::vector<Posting> getPostings(const std::string &term) const;
+    void shrinkToFit();
 
     uint32_t getDocumentCount() const;
     size_t getTermCount() const;

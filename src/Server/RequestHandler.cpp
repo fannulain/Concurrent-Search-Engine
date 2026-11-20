@@ -9,6 +9,10 @@
 #include <string>
 #include <string_view>
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 namespace
 {
 
@@ -192,7 +196,15 @@ HttpResponse RequestHandler::handleIndex(const HttpRequest &request)
         std::shared_ptr<IndexSnapshot> newSnapshot = indexerService.buildIndex(threads);
         const uint32_t docsIndexed = newSnapshot->stats.documents;
         const uint64_t timeMs = newSnapshot->stats.buildTimeMs;
-        activeSnapshot.store(std::const_pointer_cast<const IndexSnapshot>(newSnapshot), std::memory_order_release);
+        {
+            auto previous = activeSnapshot.exchange(std::const_pointer_cast<const IndexSnapshot>(newSnapshot),
+                                                    std::memory_order_acq_rel);
+            previous.reset();
+        }
+        newSnapshot.reset();
+#ifdef __GLIBC__
+        malloc_trim(0);
+#endif
 
         return makeJsonResponse(request, http::status::ok,
                                 json{{"status", "ok"}, {"documents_indexed", docsIndexed}, {"time_ms", timeMs}});

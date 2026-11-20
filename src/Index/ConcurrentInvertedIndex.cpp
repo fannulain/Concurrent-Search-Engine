@@ -26,7 +26,11 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
     }
 
     using TermEntry = std::pair<const std::string *, uint32_t>;
-    std::vector<std::vector<TermEntry>> grouped(numBuckets);
+    thread_local std::vector<std::vector<TermEntry>> grouped;
+    if (grouped.size() != numBuckets)
+    {
+        grouped.assign(numBuckets, {});
+    }
 
     for (const auto &[term, tf] : termFreq)
     {
@@ -44,6 +48,7 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
         {
             bucketPostings[*termPtr].push_back(Posting{docId, tf});
         }
+        grouped[i].clear();
     }
 
     documentCount.fetch_add(1, std::memory_order_release);
@@ -81,4 +86,17 @@ size_t ConcurrentInvertedIndex::getTermCount() const
 size_t ConcurrentInvertedIndex::getBucketCount() const
 {
     return numBuckets;
+}
+
+void ConcurrentInvertedIndex::shrinkToFit()
+{
+    for (size_t i = 0; i < numBuckets; i++)
+    {
+        std::unique_lock<std::shared_mutex> lock(buckets[i]->mtx);
+        for (auto &[term, postingList] : buckets[i]->postings)
+        {
+            (void)term;
+            postingList.shrink_to_fit();
+        }
+    }
 }
