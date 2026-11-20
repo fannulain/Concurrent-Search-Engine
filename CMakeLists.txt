@@ -16,8 +16,8 @@ endif()
 
 option(CSE_ENABLE_TSAN "Build with ThreadSanitizer" OFF)
 if(CSE_ENABLE_TSAN)
-  add_compile_options(-fsanitize=thread -fno-pie -g -O1)
-  add_link_options(-fsanitize=thread -no-pie)
+  add_compile_options(-fsanitize=thread -g -O1)
+  add_link_options(-fsanitize=thread)
 endif()
 
 find_package(Threads REQUIRED)

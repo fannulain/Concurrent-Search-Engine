@@ -18,7 +18,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++ cmake ninja-build libboost-dev nlohmann-json3-dev libgtest-dev clang-format
+            g++ clang cmake ninja-build libboost-dev nlohmann-json3-dev libgtest-dev clang-format
 
       - name: Check C++ formatting
         run: |
@@ -35,7 +35,7 @@ jobs:
 
       - name: Build and run ThreadSanitizer tests
         run: |
-          cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON
+          cmake -S . -B build-tsan -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON
           cmake --build build-tsan --parallel
           ctest --test-dir build-tsan --output-on-failure
 
