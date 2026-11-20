@@ -45,7 +45,7 @@ void ThreadPool::stop(bool finishTasks)
 
     queue->stop(!finishTasks);
 
-    for (std::thread& worker : workers)
+    for (std::thread &worker : workers)
     {
         if (worker.joinable()) worker.join();
     }

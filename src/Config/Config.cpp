@@ -7,14 +7,14 @@
 namespace
 {
 
-std::string getEnv(const char* name, const std::string& fallback)
+std::string getEnv(const char *name, const std::string &fallback)
 {
-    const char* value = std::getenv(name);
+    const char *value = std::getenv(name);
     return (value != nullptr && *value != '\0') ? std::string(value) : fallback;
 }
 
 // splits "http://host:port[/path]" into host and port
-void parseUrl(std::string_view url, std::string& host, std::string& port)
+void parseUrl(std::string_view url, std::string &host, std::string &port)
 {
     constexpr std::string_view SCHEME_PREFIX = "http://";
     if (url.substr(0, SCHEME_PREFIX.size()) == SCHEME_PREFIX)

@@ -8,7 +8,7 @@ TEST(TokenizerTest, NormalizesCaseAndSplitsOnNonLetters)
 {
     const Tokenizer tokenizer;
     const std::vector<std::string> tokens = tokenizer.tokenize("Hello, WORLD! 123 test-case_42.");
-    const std::vector<std::string> expected = { "hello", "world", "test", "case" };
+    const std::vector<std::string> expected = {"hello", "world", "test", "case"};
     EXPECT_EQ(tokens, expected);
 }
 
@@ -16,7 +16,7 @@ TEST(TokenizerTest, RemovesShortTokensAndStopWords)
 {
     const Tokenizer tokenizer;
     const std::vector<std::string> tokens = tokenizer.tokenize("I a to the and is x y search engine");
-    const std::vector<std::string> expected = { "search", "engine" };
+    const std::vector<std::string> expected = {"search", "engine"};
     EXPECT_EQ(tokens, expected);
 }
 

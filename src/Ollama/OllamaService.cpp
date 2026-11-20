@@ -20,7 +20,7 @@ using nlohmann::json;
 constexpr char USER_AGENT[] = "concurrent-search-engine/0.1";
 constexpr size_t MAX_EXPANDED_TERMS = 10;
 
-bool modelListContains(const std::string& body, const std::string& targetModel)
+bool modelListContains(const std::string &body, const std::string &targetModel)
 {
     const auto parsed = json::parse(body, nullptr, false);
     if (parsed.is_discarded() || !parsed.contains("models") || !parsed["models"].is_array())
@@ -28,7 +28,7 @@ bool modelListContains(const std::string& body, const std::string& targetModel)
         return false;
     }
 
-    for (const auto& entry : parsed["models"])
+    for (const auto &entry : parsed["models"])
     {
         if (!entry.is_object()) continue;
         const std::string name = entry.value("name", "");
@@ -51,7 +51,7 @@ net::awaitable<bool> fetchHasModel(std::string host, std::string port, std::stri
     stream.expires_after(timeout);
     co_await stream.async_connect(endpoints, net::use_awaitable);
 
-    http::request<http::empty_body> request{ http::verb::get, "/api/tags", 11 };
+    http::request<http::empty_body> request{http::verb::get, "/api/tags", 11};
     request.set(http::field::host, host);
     request.set(http::field::user_agent, USER_AGENT);
     co_await http::async_write(stream, request, net::use_awaitable);
@@ -63,7 +63,7 @@ net::awaitable<bool> fetchHasModel(std::string host, std::string port, std::stri
     beast::error_code ignored;
     stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
 
-    co_return response.result() == http::status::ok && modelListContains(response.body(), model);
+    co_return response.result() == http::status::ok &&modelListContains(response.body(), model);
 }
 
 struct GenerateHttpResponse
@@ -83,7 +83,7 @@ net::awaitable<GenerateHttpResponse> fetchGenerate(std::string host, std::string
     stream.expires_after(timeout);
     co_await stream.async_connect(endpoints, net::use_awaitable);
 
-    http::request<http::string_body> request{ http::verb::post, "/api/generate", 11 };
+    http::request<http::string_body> request{http::verb::post, "/api/generate", 11};
     request.set(http::field::host, host);
     request.set(http::field::user_agent, USER_AGENT);
     request.set(http::field::content_type, "application/json");
@@ -99,15 +99,15 @@ net::awaitable<GenerateHttpResponse> fetchGenerate(std::string host, std::string
     beast::error_code ignored;
     stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
 
-    co_return GenerateHttpResponse{ response.result_int(), std::move(response.body()) };
+    co_return GenerateHttpResponse{response.result_int(), std::move(response.body())};
 }
 
-bool extractRawTerms(const std::string& responseStr, std::vector<std::string>& outRawTerms)
+bool extractRawTerms(const std::string &responseStr, std::vector<std::string> &outRawTerms)
 {
     const json inner = json::parse(responseStr, nullptr, false);
     if (inner.is_discarded()) return false;
 
-    const json* termsArray = nullptr;
+    const json *termsArray = nullptr;
     if (inner.is_object() && inner.contains("terms") && inner["terms"].is_array())
     {
         termsArray = &inner["terms"];
@@ -118,7 +118,7 @@ bool extractRawTerms(const std::string& responseStr, std::vector<std::string>& o
     }
     else if (inner.is_object())
     {
-        for (const auto& [key, val] : inner.items())
+        for (const auto &[key, val] : inner.items())
         {
             (void)key;
             if (val.is_array())
@@ -131,7 +131,7 @@ bool extractRawTerms(const std::string& responseStr, std::vector<std::string>& o
 
     if (termsArray == nullptr) return false;
 
-    for (const auto& item : *termsArray)
+    for (const auto &item : *termsArray)
     {
         if (item.is_string())
         {
@@ -143,10 +143,10 @@ bool extractRawTerms(const std::string& responseStr, std::vector<std::string>& o
 
 } // namespace
 
-OllamaService::OllamaService(std::string host, std::string port, std::string model, const Tokenizer& tokenizer,
+OllamaService::OllamaService(std::string host, std::string port, std::string model, const Tokenizer &tokenizer,
                              int timeoutMs)
-    : host(std::move(host)), port(std::move(port)), model(std::move(model)), tokenizer(tokenizer),
-      timeoutMs(timeoutMs), workerPool(1)
+    : host(std::move(host)), port(std::move(port)), model(std::move(model)), tokenizer(tokenizer), timeoutMs(timeoutMs),
+      workerPool(1)
 {
 }
 
@@ -165,7 +165,7 @@ bool OllamaService::checkHealth(std::chrono::milliseconds timeout) const
     return result.value_or(false);
 }
 
-ExpansionResult OllamaService::performExpansion(const std::string& query) const
+ExpansionResult OllamaService::performExpansion(const std::string &query) const
 {
     ExpansionResult result;
     result.originalQuery = query;
@@ -178,10 +178,10 @@ ExpansionResult OllamaService::performExpansion(const std::string& query) const
             "full-text search. Output valid JSON only.";
 
         const json payload = {
-            { "model", model },
-            { "prompt", prompt },
-            { "stream", false },
-            { "format", "json" },
+            {"model", model},
+            {"prompt", prompt},
+            {"stream", false},
+            {"format", "json"},
         };
 
         const std::chrono::milliseconds timeout(timeoutMs);
@@ -220,8 +220,7 @@ ExpansionResult OllamaService::performExpansion(const std::string& query) const
         }
 
         const json outer = json::parse(httpResponse->body, nullptr, false);
-        if (outer.is_discarded() || !outer.is_object() || !outer.contains("response") ||
-            !outer["response"].is_string())
+        if (outer.is_discarded() || !outer.is_object() || !outer.contains("response") || !outer["response"].is_string())
         {
             result.error = "Invalid response payload from Ollama";
             return result;
@@ -235,15 +234,15 @@ ExpansionResult OllamaService::performExpansion(const std::string& query) const
         }
 
         std::unordered_set<std::string> originalTokens;
-        for (const std::string& tok : tokenizer.tokenize(query))
+        for (const std::string &tok : tokenizer.tokenize(query))
         {
             originalTokens.insert(tok);
         }
 
         std::unordered_set<std::string> seenExpanded;
-        for (const std::string& rawTerm : rawTerms)
+        for (const std::string &rawTerm : rawTerms)
         {
-            for (const std::string& tok : tokenizer.tokenize(rawTerm))
+            for (const std::string &tok : tokenizer.tokenize(rawTerm))
             {
                 if (originalTokens.find(tok) != originalTokens.end()) continue;
                 if (!seenExpanded.insert(tok).second) continue;
@@ -256,7 +255,7 @@ ExpansionResult OllamaService::performExpansion(const std::string& query) const
             }
         }
     }
-    catch (const std::exception& e)
+    catch (const std::exception &e)
     {
         result.error = e.what();
     }
@@ -264,12 +263,12 @@ ExpansionResult OllamaService::performExpansion(const std::string& query) const
     return result;
 }
 
-std::future<ExpansionResult> OllamaService::expandQuery(const std::string& query)
+std::future<ExpansionResult> OllamaService::expandQuery(const std::string &query)
 {
     return workerPool.addTask([this, query]() { return performExpansion(query); });
 }
 
-void OllamaService::expandQueryAsync(const std::string& query, std::function<void(ExpansionResult)> onComplete)
+void OllamaService::expandQueryAsync(const std::string &query, std::function<void(ExpansionResult)> onComplete)
 {
     workerPool.addTask(
         [this, query, cb = std::move(onComplete)]() mutable

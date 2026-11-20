@@ -62,12 +62,12 @@ std::pair<size_t, size_t> computeContentBounds(std::string_view content)
 
     if (endOffset <= startOffset)
     {
-        return { 0, content.size() };
+        return {0, content.size()};
     }
-    return { startOffset, endOffset };
+    return {startOffset, endOffset};
 }
 
-bool readBinaryFile(const std::filesystem::path& filePath, std::string& outContent)
+bool readBinaryFile(const std::filesystem::path &filePath, std::string &outContent)
 {
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);
     if (!file.is_open())
@@ -96,8 +96,8 @@ bool readBinaryFile(const std::filesystem::path& filePath, std::string& outConte
     return true;
 }
 
-void indexFile(const std::filesystem::path& filePath, const Tokenizer& tokenizer, IndexSnapshot& snapshot,
-               std::mutex& logMtx)
+void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer, IndexSnapshot &snapshot,
+               std::mutex &logMtx)
 {
     std::string content;
     if (!readBinaryFile(filePath, content))
@@ -174,7 +174,7 @@ void indexFile(const std::filesystem::path& filePath, const Tokenizer& tokenizer
 
 } // namespace
 
-IndexerService::IndexerService(const Tokenizer& tokenizer, std::string datasetPath, size_t indexBuckets)
+IndexerService::IndexerService(const Tokenizer &tokenizer, std::string datasetPath, size_t indexBuckets)
     : tokenizer(tokenizer), datasetPath(std::move(datasetPath)), indexBuckets(indexBuckets)
 {
 }
@@ -229,14 +229,13 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         std::vector<std::future<void>> futures;
         futures.reserve(files.size());
 
-        for (const auto& filePath : files)
+        for (const auto &filePath : files)
         {
-            futures.push_back(
-                pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(), &logMtx]()
-                             { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
+            futures.push_back(pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(),
+                                            &logMtx]() { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
         }
 
-        for (auto& fut : futures)
+        for (auto &fut : futures)
         {
             fut.get();
         }

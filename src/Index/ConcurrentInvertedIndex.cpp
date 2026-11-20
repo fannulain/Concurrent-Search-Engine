@@ -12,12 +12,12 @@ ConcurrentInvertedIndex::ConcurrentInvertedIndex(size_t bucketCount) : numBucket
     }
 }
 
-size_t ConcurrentInvertedIndex::getBucketIndex(const std::string& term) const
+size_t ConcurrentInvertedIndex::getBucketIndex(const std::string &term) const
 {
     return std::hash<std::string>{}(term) % numBuckets;
 }
 
-void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t>& termFreq)
+void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq)
 {
     if (termFreq.empty())
     {
@@ -25,10 +25,10 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
         return;
     }
 
-    using TermEntry = std::pair<const std::string*, uint32_t>;
+    using TermEntry = std::pair<const std::string *, uint32_t>;
     std::vector<std::vector<TermEntry>> grouped(numBuckets);
 
-    for (const auto& [term, tf] : termFreq)
+    for (const auto &[term, tf] : termFreq)
     {
         grouped[getBucketIndex(term)].emplace_back(&term, tf);
     }
@@ -39,17 +39,17 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
         if (grouped[i].empty()) continue;
 
         std::unique_lock<std::shared_mutex> lock(buckets[i]->mtx);
-        auto& bucketPostings = buckets[i]->postings;
-        for (const auto& [termPtr, tf] : grouped[i])
+        auto &bucketPostings = buckets[i]->postings;
+        for (const auto &[termPtr, tf] : grouped[i])
         {
-            bucketPostings[*termPtr].push_back(Posting{ docId, tf });
+            bucketPostings[*termPtr].push_back(Posting{docId, tf});
         }
     }
 
     documentCount.fetch_add(1, std::memory_order_release);
 }
 
-std::vector<Posting> ConcurrentInvertedIndex::getPostings(const std::string& term) const
+std::vector<Posting> ConcurrentInvertedIndex::getPostings(const std::string &term) const
 {
     const size_t bucketIndex = getBucketIndex(term);
     std::shared_lock<std::shared_mutex> lock(buckets[bucketIndex]->mtx);

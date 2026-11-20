@@ -19,16 +19,15 @@ namespace net = boost::asio;
 using tcp = net::ip::tcp;
 using nlohmann::json;
 
-constexpr std::chrono::seconds IDLE_TIMEOUT{ 30 };
+constexpr std::chrono::seconds IDLE_TIMEOUT{30};
 constexpr int DEFAULT_WS_LIMIT = 10;
 constexpr int MIN_WS_LIMIT = 1;
 constexpr int MAX_WS_LIMIT = 100;
 
-bool isBenignError(const beast::error_code& ec)
+bool isBenignError(const beast::error_code &ec)
 {
-    return ec == beast::error::timeout || ec == net::error::operation_aborted ||
-           ec == net::error::connection_reset || ec == http::error::end_of_stream ||
-           ec == websocket::error::closed || ec == net::error::eof;
+    return ec == beast::error::timeout || ec == net::error::operation_aborted || ec == net::error::connection_reset ||
+           ec == http::error::end_of_stream || ec == websocket::error::closed || ec == net::error::eof;
 }
 
 std::string_view stripQueryString(beast::string_view target)
@@ -52,7 +51,7 @@ std::string trimQuery(std::string_view input)
     return std::string(input.substr(start, end - start));
 }
 
-bool parseLimitInt(const json& value, int& outVal)
+bool parseLimitInt(const json &value, int &outVal)
 {
     if (!value.is_number_integer()) return false;
     if (value.is_number_unsigned())
@@ -70,7 +69,7 @@ bool parseLimitInt(const json& value, int& outVal)
 
 } // namespace
 
-WebSocketSession::WebSocketSession(tcp::socket&& socket, RequestHandler& requestHandler)
+WebSocketSession::WebSocketSession(tcp::socket &&socket, RequestHandler &requestHandler)
     : ws(std::move(socket)), requestHandler(requestHandler)
 {
 }
@@ -79,7 +78,7 @@ void WebSocketSession::start(HttpRequest request)
 {
     beast::get_lowest_layer(ws).expires_never();
     ws.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
-    ws.set_option(websocket::stream_base::decorator([](websocket::response_type& res)
+    ws.set_option(websocket::stream_base::decorator([](websocket::response_type &res)
                                                     { res.set(http::field::server, "concurrent-search-engine"); }));
     ws.text(true);
 
@@ -150,20 +149,19 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t /*bytesTransferr
             query,
             [self = shared_from_this(), executor, limit](ExpansionResult expansion) mutable
             {
-                net::post(executor,
-                          [self = std::move(self), exp = std::move(expansion), limit]() mutable
+                net::post(executor, [self = std::move(self), exp = std::move(expansion), limit]() mutable
                           { self->onExpansionComplete(std::move(exp), limit); });
             });
     }
-    catch (const std::exception& e)
+    catch (const std::exception &e)
     {
         sendError(e.what());
     }
 }
 
-void WebSocketSession::sendError(const std::string& message)
+void WebSocketSession::sendError(const std::string &message)
 {
-    outgoingMessage = json{ { "stage", "error" }, { "data", { { "message", message } } } }.dump();
+    outgoingMessage = json{{"stage", "error"}, {"data", {{"message", message}}}}.dump();
     ws.async_write(net::buffer(outgoingMessage),
                    beast::bind_front_handler(&WebSocketSession::onPipelineWritten, shared_from_this()));
 }
@@ -171,18 +169,18 @@ void WebSocketSession::sendError(const std::string& message)
 void WebSocketSession::onExpansionComplete(ExpansionResult expansion, int limit)
 {
     json stage1Data = {
-        { "original", expansion.originalQuery },
-        { "expanded_terms", expansion.expandedTerms },
+        {"original", expansion.originalQuery},
+        {"expanded_terms", expansion.expandedTerms},
     };
     if (!expansion.error.empty())
     {
         stage1Data["error"] = expansion.error;
     }
 
-    outgoingMessage = json{ { "stage", "query_expansion" }, { "data", std::move(stage1Data) } }.dump();
-    ws.async_write(net::buffer(outgoingMessage),
-                   beast::bind_front_handler(&WebSocketSession::onStage1Written, shared_from_this(),
-                                             std::move(expansion), limit));
+    outgoingMessage = json{{"stage", "query_expansion"}, {"data", std::move(stage1Data)}}.dump();
+    ws.async_write(
+        net::buffer(outgoingMessage),
+        beast::bind_front_handler(&WebSocketSession::onStage1Written, shared_from_this(), std::move(expansion), limit));
 }
 
 void WebSocketSession::onStage1Written(ExpansionResult expansion, int limit, beast::error_code ec,
@@ -204,7 +202,7 @@ void WebSocketSession::onStage1Written(ExpansionResult expansion, int limit, bea
     if (snap)
     {
         const auto startTime = std::chrono::steady_clock::now();
-        const SearchEngine& engine = requestHandler.getSearchEngine();
+        const SearchEngine &engine = requestHandler.getSearchEngine();
         const std::vector<WeightedTerm> terms =
             engine.buildWeightedTerms(expansion.originalQuery, expansion.expandedTerms);
         const std::vector<SearchResult> results = engine.search(*snap, terms, static_cast<size_t>(limit));
@@ -213,15 +211,14 @@ void WebSocketSession::onStage1Written(ExpansionResult expansion, int limit, bea
         timeMs = static_cast<uint64_t>(
             std::max<long long>(0, std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count()));
 
-        for (const SearchResult& res : results)
+        for (const SearchResult &res : results)
         {
-            resultsJson.push_back(json{ { "doc_id", res.docId }, { "score", res.score }, { "snippet", res.snippet } });
+            resultsJson.push_back(json{{"doc_id", res.docId}, {"score", res.score}, {"snippet", res.snippet}});
         }
     }
 
     outgoingMessage =
-        json{ { "stage", "keyword_search" }, { "data", { { "results", std::move(resultsJson) }, { "time_ms", timeMs } } } }
-            .dump();
+        json{{"stage", "keyword_search"}, {"data", {{"results", std::move(resultsJson)}, {"time_ms", timeMs}}}}.dump();
 
     ws.async_write(net::buffer(outgoingMessage),
                    beast::bind_front_handler(&WebSocketSession::onStage2Written, shared_from_this()));
@@ -238,7 +235,7 @@ void WebSocketSession::onStage2Written(beast::error_code ec, std::size_t /*bytes
         return;
     }
 
-    outgoingMessage = json{ { "stage", "done" } }.dump();
+    outgoingMessage = json{{"stage", "done"}}.dump();
     ws.async_write(net::buffer(outgoingMessage),
                    beast::bind_front_handler(&WebSocketSession::onPipelineWritten, shared_from_this()));
 }
@@ -257,7 +254,7 @@ void WebSocketSession::onPipelineWritten(beast::error_code ec, std::size_t /*byt
     doRead();
 }
 
-ClientSession::ClientSession(tcp::socket&& socket, RequestHandler& requestHandler)
+ClientSession::ClientSession(tcp::socket &&socket, RequestHandler &requestHandler)
     : stream(std::move(socket)), requestHandler(requestHandler)
 {
 }
@@ -293,11 +290,11 @@ void ClientSession::onRead(beast::error_code ec, std::size_t /*bytesTransferred*
     {
         if (stripQueryString(request.target()) != "/ws/search")
         {
-            response = HttpResponse{ http::status::not_found, request.version() };
+            response = HttpResponse{http::status::not_found, request.version()};
             response.set(http::field::server, "concurrent-search-engine");
             response.set(http::field::content_type, "application/json");
             response.keep_alive(false);
-            response.body() = json{ { "error", "WebSocket endpoint not found" } }.dump();
+            response.body() = json{{"error", "WebSocket endpoint not found"}}.dump();
             response.prepare_payload();
             http::async_write(stream, response,
                               beast::bind_front_handler(&ClientSession::onWrite, shared_from_this(), false));

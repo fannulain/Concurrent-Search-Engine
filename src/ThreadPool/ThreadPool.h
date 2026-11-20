@@ -20,11 +20,11 @@ private:
     std::unique_ptr<TaskQueue<std::function<void()>>> queue;
     std::vector<std::thread> workers;
 
-    std::atomic<bool> stopFlag{ false };
-    std::atomic<bool> pauseFlag{ false };
+    std::atomic<bool> stopFlag{false};
+    std::atomic<bool> pauseFlag{false};
 
-    std::atomic<int> tasksSubmitted{ 0 };
-    std::atomic<int> tasksCompleted{ 0 };
+    std::atomic<int> tasksSubmitted{0};
+    std::atomic<int> tasksCompleted{0};
 
     void workerLoop();
 
@@ -32,11 +32,11 @@ public:
     explicit ThreadPool(int threadCount = 0);
     ~ThreadPool();
 
-    ThreadPool(const ThreadPool&) = delete;
-    ThreadPool& operator=(const ThreadPool&) = delete;
+    ThreadPool(const ThreadPool &) = delete;
+    ThreadPool &operator=(const ThreadPool &) = delete;
 
     template <typename Func, typename... Args>
-    auto addTask(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<Func, Args...>>;
+    auto addTask(Func &&func, Args &&...args) -> std::future<std::invoke_result_t<Func, Args...>>;
 
     void stop(bool finishTasks = true);
     void pause();
@@ -52,7 +52,7 @@ public:
 };
 
 template <typename Func, typename... Args>
-auto ThreadPool::addTask(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<Func, Args...>>
+auto ThreadPool::addTask(Func &&func, Args &&...args) -> std::future<std::invoke_result_t<Func, Args...>>
 {
     using ReturnType = std::invoke_result_t<Func, Args...>;
 
@@ -63,9 +63,7 @@ auto ThreadPool::addTask(Func&& func, Args&&... args) -> std::future<std::invoke
 
     auto boundTask = [f = std::forward<Func>(func),
                       capturedArgs = std::make_tuple(std::forward<Args>(args)...)]() mutable -> ReturnType
-    {
-        return std::apply(std::move(f), std::move(capturedArgs));
-    };
+    { return std::apply(std::move(f), std::move(capturedArgs)); };
 
     auto packagedTask = std::make_shared<std::packaged_task<ReturnType()>>(std::move(boundTask));
     std::future<ReturnType> resultFuture = packagedTask->get_future();

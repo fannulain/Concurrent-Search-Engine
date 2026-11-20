@@ -10,12 +10,12 @@
 class IndexerService
 {
 private:
-    const Tokenizer& tokenizer;
+    const Tokenizer &tokenizer;
     std::string datasetPath;
     size_t indexBuckets;
 
 public:
-    IndexerService(const Tokenizer& tokenizer, std::string datasetPath, size_t indexBuckets = 64);
+    IndexerService(const Tokenizer &tokenizer, std::string datasetPath, size_t indexBuckets = 64);
 
     std::shared_ptr<IndexSnapshot> buildIndex(int threadCount) const;
 };

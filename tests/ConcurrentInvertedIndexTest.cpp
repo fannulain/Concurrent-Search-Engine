@@ -10,8 +10,8 @@ TEST(ConcurrentInvertedIndexTest, AddsAndRetrievesPostings)
 {
     ConcurrentInvertedIndex index(16);
 
-    index.addDocument(0, { { "alpha", 2 }, { "beta", 1 } });
-    index.addDocument(1, { { "alpha", 5 }, { "gamma", 3 } });
+    index.addDocument(0, {{"alpha", 2}, {"beta", 1}});
+    index.addDocument(1, {{"alpha", 5}, {"gamma", 3}});
 
     EXPECT_EQ(index.getDocumentCount(), 2u);
     EXPECT_EQ(index.getTermCount(), 3u);
@@ -34,7 +34,7 @@ TEST(ConcurrentInvertedIndexTest, ConcurrentWritersAndReadersUnderTsan)
     constexpr int DOCS_PER_WRITER = 100;
     constexpr int READER_THREADS = 8;
 
-    std::atomic<bool> writersDone{ false };
+    std::atomic<bool> writersDone{false};
     std::vector<std::thread> writers;
     std::vector<std::thread> readers;
 
@@ -70,13 +70,13 @@ TEST(ConcurrentInvertedIndexTest, ConcurrentWritersAndReadersUnderTsan)
             });
     }
 
-    for (auto& writer : writers)
+    for (auto &writer : writers)
     {
         writer.join();
     }
     writersDone.store(true, std::memory_order_release);
 
-    for (auto& reader : readers)
+    for (auto &reader : readers)
     {
         reader.join();
     }

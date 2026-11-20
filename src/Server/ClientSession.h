@@ -14,13 +14,13 @@ class WebSocketSession : public std::enable_shared_from_this<WebSocketSession>
 private:
     boost::beast::websocket::stream<boost::beast::tcp_stream> ws;
     boost::beast::flat_buffer buffer;
-    RequestHandler& requestHandler;
+    RequestHandler &requestHandler;
     std::string outgoingMessage;
 
     void onAccept(boost::beast::error_code ec);
     void doRead();
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
-    void sendError(const std::string& message);
+    void sendError(const std::string &message);
     void onExpansionComplete(ExpansionResult expansion, int limit);
     void onStage1Written(ExpansionResult expansion, int limit, boost::beast::error_code ec,
                          std::size_t bytesTransferred);
@@ -28,7 +28,7 @@ private:
     void onPipelineWritten(boost::beast::error_code ec, std::size_t bytesTransferred);
 
 public:
-    WebSocketSession(boost::asio::ip::tcp::socket&& socket, RequestHandler& requestHandler);
+    WebSocketSession(boost::asio::ip::tcp::socket &&socket, RequestHandler &requestHandler);
 
     void start(HttpRequest request);
 };
@@ -40,7 +40,7 @@ private:
     boost::beast::flat_buffer buffer;
     HttpRequest request;
     HttpResponse response;
-    RequestHandler& requestHandler;
+    RequestHandler &requestHandler;
 
     void doRead();
     void onRead(boost::beast::error_code ec, std::size_t bytesTransferred);
@@ -48,7 +48,7 @@ private:
     void doClose();
 
 public:
-    ClientSession(boost::asio::ip::tcp::socket&& socket, RequestHandler& requestHandler);
+    ClientSession(boost::asio::ip::tcp::socket &&socket, RequestHandler &requestHandler);
 
     void start();
 };

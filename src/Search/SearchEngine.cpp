@@ -20,7 +20,7 @@ struct ScoredCandidate
     double score = 0.0;
 };
 
-size_t findFirstTermMatchOffset(std::string_view text, const std::unordered_set<std::string_view>& queryTerms)
+size_t findFirstTermMatchOffset(std::string_view text, const std::unordered_set<std::string_view> &queryTerms)
 {
     std::string token;
     token.reserve(32);
@@ -86,17 +86,15 @@ std::string normalizeSnippetWhitespace(std::string_view slice)
 
 } // namespace
 
-SearchEngine::SearchEngine(const Tokenizer& tokenizer) : tokenizer(tokenizer)
-{
-}
+SearchEngine::SearchEngine(const Tokenizer &tokenizer) : tokenizer(tokenizer) {}
 
-std::string SearchEngine::buildSnippet(std::string_view text, const std::vector<WeightedTerm>& terms)
+std::string SearchEngine::buildSnippet(std::string_view text, const std::vector<WeightedTerm> &terms)
 {
     if (text.empty()) return {};
 
     std::unordered_set<std::string_view> queryTerms;
     queryTerms.reserve(terms.size());
-    for (const auto& wt : terms)
+    for (const auto &wt : terms)
     {
         queryTerms.insert(wt.term);
     }
@@ -148,26 +146,26 @@ std::string SearchEngine::buildSnippet(std::string_view text, const std::vector<
 }
 
 std::vector<WeightedTerm> SearchEngine::buildWeightedTerms(std::string_view originalQuery,
-                                                             const std::vector<std::string>& expandedTerms) const
+                                                           const std::vector<std::string> &expandedTerms) const
 {
     std::vector<WeightedTerm> result;
     std::unordered_set<std::string> seen;
 
-    for (const std::string& token : tokenizer.tokenize(originalQuery))
+    for (const std::string &token : tokenizer.tokenize(originalQuery))
     {
         if (seen.insert(token).second)
         {
-            result.push_back(WeightedTerm{ token, 1.0 });
+            result.push_back(WeightedTerm{token, 1.0});
         }
     }
 
-    for (const std::string& rawExpanded : expandedTerms)
+    for (const std::string &rawExpanded : expandedTerms)
     {
-        for (const std::string& token : tokenizer.tokenize(rawExpanded))
+        for (const std::string &token : tokenizer.tokenize(rawExpanded))
         {
             if (seen.insert(token).second)
             {
-                result.push_back(WeightedTerm{ token, 0.5 });
+                result.push_back(WeightedTerm{token, 0.5});
             }
         }
     }
@@ -175,7 +173,7 @@ std::vector<WeightedTerm> SearchEngine::buildWeightedTerms(std::string_view orig
     return result;
 }
 
-std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, const std::vector<WeightedTerm>& terms,
+std::vector<SearchResult> SearchEngine::search(const IndexSnapshot &snapshot, const std::vector<WeightedTerm> &terms,
                                                size_t limit) const
 {
     if (terms.empty() || limit == 0) return {};
@@ -185,7 +183,7 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, co
 
     std::unordered_map<uint32_t, double> docScores;
 
-    for (const WeightedTerm& wt : terms)
+    for (const WeightedTerm &wt : terms)
     {
         if (wt.weight <= 0.0 || wt.term.empty()) continue;
 
@@ -195,7 +193,7 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, co
         const double df = static_cast<double>(postings.size());
         const double idf = std::log(static_cast<double>(totalDocs) / df);
 
-        for (const Posting& posting : postings)
+        for (const Posting &posting : postings)
         {
             const uint32_t docTokenCount = snapshot.docs.getTokenCount(posting.docId);
             if (docTokenCount == 0) continue;
@@ -208,7 +206,7 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, co
     if (docScores.empty()) return {};
 
     double maxRawScore = 0.0;
-    for (const auto& [internalId, rawScore] : docScores)
+    for (const auto &[internalId, rawScore] : docScores)
     {
         (void)internalId;
         if (rawScore > maxRawScore) maxRawScore = rawScore;
@@ -217,17 +215,17 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, co
     std::vector<ScoredCandidate> candidates;
     candidates.reserve(docScores.size());
 
-    for (const auto& [internalId, rawScore] : docScores)
+    for (const auto &[internalId, rawScore] : docScores)
     {
         // assign 1.0 when maxRawScore is 0 (for example when term occurs in every document)
         const double normalizedScore = maxRawScore > 0.0 ? (rawScore / maxRawScore) : 1.0;
-        candidates.push_back(ScoredCandidate{ internalId, snapshot.docs.getDocId(internalId), normalizedScore });
+        candidates.push_back(ScoredCandidate{internalId, snapshot.docs.getDocId(internalId), normalizedScore});
     }
 
     const size_t resultCount = std::min(limit, candidates.size());
     std::partial_sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(resultCount),
                       candidates.end(),
-                      [](const ScoredCandidate& a, const ScoredCandidate& b)
+                      [](const ScoredCandidate &a, const ScoredCandidate &b)
                       {
                           if (a.score != b.score) return a.score > b.score;
                           return a.docId < b.docId;
@@ -238,15 +236,15 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot& snapshot, co
 
     for (size_t i = 0; i < resultCount; i++)
     {
-        const ScoredCandidate& candidate = candidates[i];
+        const ScoredCandidate &candidate = candidates[i];
         const std::string text = snapshot.docs.readText(candidate.internalId);
-        results.push_back(SearchResult{ candidate.docId, candidate.score, buildSnippet(text, terms) });
+        results.push_back(SearchResult{candidate.docId, candidate.score, buildSnippet(text, terms)});
     }
 
     return results;
 }
 
-std::vector<SearchResult> SearchEngine::searchQuery(const IndexSnapshot& snapshot, std::string_view query,
+std::vector<SearchResult> SearchEngine::searchQuery(const IndexSnapshot &snapshot, std::string_view query,
                                                     size_t limit) const
 {
     const std::vector<WeightedTerm> terms = buildWeightedTerms(query, {});

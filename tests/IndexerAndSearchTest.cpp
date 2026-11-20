@@ -22,7 +22,7 @@ private:
 public:
     TempDirGuard()
     {
-        static std::atomic<int> counter{ 0 };
+        static std::atomic<int> counter{0};
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         dirPath = std::filesystem::temp_directory_path() /
                   ("cse_test_" + std::to_string(stamp) + "_" + std::to_string(counter.fetch_add(1)));
@@ -35,10 +35,10 @@ public:
         std::filesystem::remove_all(dirPath, ec);
     }
 
-    const std::filesystem::path& path() const { return dirPath; }
+    const std::filesystem::path &path() const { return dirPath; }
 };
 
-void writeTextFile(const std::filesystem::path& path, const std::string& content)
+void writeTextFile(const std::filesystem::path &path, const std::string &content)
 {
     std::ofstream out(path, std::ios::binary);
     ASSERT_TRUE(out.is_open());
@@ -113,7 +113,7 @@ TEST(IndexerAndSearchTest, ComputesTfIdfNormalizationTieBreakingAndWeights)
     EXPECT_LT(keywordResults[1].score, 1.0);
 
     // expanded term gets weight 0.5 vs original term weight 1.0
-    const std::vector<WeightedTerm> weighted = engine.buildWeightedTerms("rocket", { "orbit" });
+    const std::vector<WeightedTerm> weighted = engine.buildWeightedTerms("rocket", {"orbit"});
     const auto weightedResults = engine.search(*snap, weighted, 10);
     ASSERT_EQ(weightedResults.size(), 2u);
     EXPECT_EQ(weightedResults[0].docId, "bookA_0");

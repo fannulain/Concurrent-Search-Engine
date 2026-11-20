@@ -15,27 +15,27 @@ using HttpResponse = boost::beast::http::response<boost::beast::http::string_bod
 class RequestHandler
 {
 private:
-    OllamaService& ollamaService;
-    const IndexerService& indexerService;
-    const SearchEngine& searchEngine;
+    OllamaService &ollamaService;
+    const IndexerService &indexerService;
+    const SearchEngine &searchEngine;
 
     std::atomic<std::shared_ptr<const IndexSnapshot>> activeSnapshot;
-    std::atomic<bool> buildInProgress{ false };
+    std::atomic<bool> buildInProgress{false};
 
-    HttpResponse handleHealth(const HttpRequest& request) const;
-    HttpResponse handleIndex(const HttpRequest& request);
-    HttpResponse handleSearch(const HttpRequest& request) const;
-    HttpResponse handleStats(const HttpRequest& request) const;
+    HttpResponse handleHealth(const HttpRequest &request) const;
+    HttpResponse handleIndex(const HttpRequest &request);
+    HttpResponse handleSearch(const HttpRequest &request) const;
+    HttpResponse handleStats(const HttpRequest &request) const;
 
 public:
-    RequestHandler(OllamaService& ollamaService, const IndexerService& indexerService,
-                   const SearchEngine& searchEngine);
+    RequestHandler(OllamaService &ollamaService, const IndexerService &indexerService,
+                   const SearchEngine &searchEngine);
 
-    HttpResponse handle(const HttpRequest& request);
+    HttpResponse handle(const HttpRequest &request);
 
     std::shared_ptr<const IndexSnapshot> getSnapshot() const;
-    OllamaService& getOllamaService();
-    const SearchEngine& getSearchEngine() const;
+    OllamaService &getOllamaService();
+    const SearchEngine &getSearchEngine() const;
 };
 
 #endif // REQUESTHANDLER_H

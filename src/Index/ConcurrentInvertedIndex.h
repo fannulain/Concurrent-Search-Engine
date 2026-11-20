@@ -27,18 +27,18 @@ class ConcurrentInvertedIndex
 private:
     size_t numBuckets;
     std::vector<std::unique_ptr<Bucket>> buckets;
-    std::atomic<uint32_t> documentCount{ 0 };
+    std::atomic<uint32_t> documentCount{0};
 
-    size_t getBucketIndex(const std::string& term) const;
+    size_t getBucketIndex(const std::string &term) const;
 
 public:
     explicit ConcurrentInvertedIndex(size_t bucketCount = 64);
 
-    ConcurrentInvertedIndex(const ConcurrentInvertedIndex&) = delete;
-    ConcurrentInvertedIndex& operator=(const ConcurrentInvertedIndex&) = delete;
+    ConcurrentInvertedIndex(const ConcurrentInvertedIndex &) = delete;
+    ConcurrentInvertedIndex &operator=(const ConcurrentInvertedIndex &) = delete;
 
-    void addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t>& termFreq);
-    std::vector<Posting> getPostings(const std::string& term) const;
+    void addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq);
+    std::vector<Posting> getPostings(const std::string &term) const;
 
     uint32_t getDocumentCount() const;
     size_t getTermCount() const;

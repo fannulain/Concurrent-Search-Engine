@@ -22,25 +22,25 @@ private:
     std::string host;
     std::string port;
     std::string model;
-    const Tokenizer& tokenizer;
+    const Tokenizer &tokenizer;
     int timeoutMs;
     ThreadPool workerPool;
 
-    ExpansionResult performExpansion(const std::string& query) const;
+    ExpansionResult performExpansion(const std::string &query) const;
 
 public:
-    OllamaService(std::string host, std::string port, std::string model, const Tokenizer& tokenizer,
+    OllamaService(std::string host, std::string port, std::string model, const Tokenizer &tokenizer,
                   int timeoutMs = 30000);
     ~OllamaService();
 
-    OllamaService(const OllamaService&) = delete;
-    OllamaService& operator=(const OllamaService&) = delete;
+    OllamaService(const OllamaService &) = delete;
+    OllamaService &operator=(const OllamaService &) = delete;
 
     bool checkHealth(std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) const;
-    std::future<ExpansionResult> expandQuery(const std::string& query);
-    void expandQueryAsync(const std::string& query, std::function<void(ExpansionResult)> onComplete);
+    std::future<ExpansionResult> expandQuery(const std::string &query);
+    void expandQueryAsync(const std::string &query, std::function<void(ExpansionResult)> onComplete);
 
-    const std::string& getModel() const { return model; }
+    const std::string &getModel() const { return model; }
 };
 
 #endif // OLLAMASERVICE_H

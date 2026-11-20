@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-template <typename TaskType>
-class TaskQueue
+template <typename TaskType> class TaskQueue
 {
 private:
     std::queue<TaskType> innerQueue;
@@ -22,19 +21,17 @@ public:
     TaskQueue() = default;
     ~TaskQueue() = default;
 
-    TaskQueue(const TaskQueue&) = delete;
-    TaskQueue& operator=(const TaskQueue&) = delete;
+    TaskQueue(const TaskQueue &) = delete;
+    TaskQueue &operator=(const TaskQueue &) = delete;
 
     bool empty() const;
     int size() const;
 
-    template <typename TaskArg>
-    bool push(TaskArg&& task);
+    template <typename TaskArg> bool push(TaskArg &&task);
 
-    template <typename... Args>
-    bool emplace(Args&&... args);
+    template <typename... Args> bool emplace(Args &&...args);
 
-    bool pop(TaskType& task);
+    bool pop(TaskType &task);
     void clear();
 
     std::vector<TaskType> stop(bool terminateInstantly);
@@ -42,23 +39,19 @@ public:
     void resume();
 };
 
-template <typename TaskType>
-bool TaskQueue<TaskType>::empty() const
+template <typename TaskType> bool TaskQueue<TaskType>::empty() const
 {
     std::lock_guard<std::mutex> lock(mtx);
     return innerQueue.empty();
 }
 
-template <typename TaskType>
-int TaskQueue<TaskType>::size() const
+template <typename TaskType> int TaskQueue<TaskType>::size() const
 {
     std::lock_guard<std::mutex> lock(mtx);
     return static_cast<int>(innerQueue.size());
 }
 
-template <typename TaskType>
-template <typename TaskArg>
-bool TaskQueue<TaskType>::push(TaskArg&& task)
+template <typename TaskType> template <typename TaskArg> bool TaskQueue<TaskType>::push(TaskArg &&task)
 {
     {
         std::lock_guard<std::mutex> lock(mtx);
@@ -69,9 +62,7 @@ bool TaskQueue<TaskType>::push(TaskArg&& task)
     return true;
 }
 
-template <typename TaskType>
-template <typename... Args>
-bool TaskQueue<TaskType>::emplace(Args&&... args)
+template <typename TaskType> template <typename... Args> bool TaskQueue<TaskType>::emplace(Args &&...args)
 {
     {
         std::lock_guard<std::mutex> lock(mtx);
@@ -82,8 +73,7 @@ bool TaskQueue<TaskType>::emplace(Args&&... args)
     return true;
 }
 
-template <typename TaskType>
-bool TaskQueue<TaskType>::pop(TaskType& task)
+template <typename TaskType> bool TaskQueue<TaskType>::pop(TaskType &task)
 {
     std::unique_lock<std::mutex> lock(mtx);
 
@@ -101,16 +91,14 @@ bool TaskQueue<TaskType>::pop(TaskType& task)
     return false;
 }
 
-template <typename TaskType>
-void TaskQueue<TaskType>::clear()
+template <typename TaskType> void TaskQueue<TaskType>::clear()
 {
     std::queue<TaskType> emptyQueue;
     std::lock_guard<std::mutex> lock(mtx);
     std::swap(innerQueue, emptyQueue);
 }
 
-template <typename TaskType>
-std::vector<TaskType> TaskQueue<TaskType>::stop(bool terminateInstantly)
+template <typename TaskType> std::vector<TaskType> TaskQueue<TaskType>::stop(bool terminateInstantly)
 {
     std::vector<TaskType> droppedTasks;
     {
@@ -133,15 +121,13 @@ std::vector<TaskType> TaskQueue<TaskType>::stop(bool terminateInstantly)
     return droppedTasks;
 }
 
-template <typename TaskType>
-void TaskQueue<TaskType>::pause()
+template <typename TaskType> void TaskQueue<TaskType>::pause()
 {
     std::lock_guard<std::mutex> lock(mtx);
     pauseFlag = true;
 }
 
-template <typename TaskType>
-void TaskQueue<TaskType>::resume()
+template <typename TaskType> void TaskQueue<TaskType>::resume()
 {
     {
         std::lock_guard<std::mutex> lock(mtx);

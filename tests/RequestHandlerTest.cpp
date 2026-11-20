@@ -1,8 +1,8 @@
+#include "Server/RequestHandler.h"
 #include "Index/IndexerService.h"
 #include "Index/Tokenizer.h"
 #include "Ollama/OllamaService.h"
 #include "Search/SearchEngine.h"
-#include "Server/RequestHandler.h"
 #include <atomic>
 #include <boost/beast/http.hpp>
 #include <chrono>
@@ -26,7 +26,7 @@ private:
 public:
     TempDatasetGuard()
     {
-        static std::atomic<int> counter{ 0 };
+        static std::atomic<int> counter{0};
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         dirPath = std::filesystem::temp_directory_path() /
                   ("cse_handler_test_" + std::to_string(stamp) + "_" + std::to_string(counter.fetch_add(1)));
@@ -39,12 +39,12 @@ public:
         std::filesystem::remove_all(dirPath, ec);
     }
 
-    const std::filesystem::path& path() const { return dirPath; }
+    const std::filesystem::path &path() const { return dirPath; }
 };
 
-HttpRequest makeRequest(http::verb method, const std::string& target, const std::string& body = "")
+HttpRequest makeRequest(http::verb method, const std::string &target, const std::string &body = "")
 {
-    HttpRequest req{ method, target, 11 };
+    HttpRequest req{method, target, 11};
     req.set(http::field::host, "localhost");
     if (!body.empty())
     {
@@ -130,16 +130,17 @@ TEST(RequestHandlerTest, ValidatesContractsAndServesSearchAfterIndexing)
     EXPECT_EQ(statsBody["threads_used"], 2);
 
     // invalid /api/search requests -> 400
-    EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/search", R"({"query":"   ","mode":"keyword"})"))
-                  .result(),
-              http::status::bad_request);
-    EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/search", R"({"query":"dante","mode":"semantic"})"))
-                  .result(),
-              http::status::bad_request);
-    EXPECT_EQ(handler.handle(
-                  makeRequest(http::verb::post, "/api/search", R"({"query":"dante","mode":"keyword","limit":101})"))
-                  .result(),
-              http::status::bad_request);
+    EXPECT_EQ(
+        handler.handle(makeRequest(http::verb::post, "/api/search", R"({"query":"   ","mode":"keyword"})")).result(),
+        http::status::bad_request);
+    EXPECT_EQ(
+        handler.handle(makeRequest(http::verb::post, "/api/search", R"({"query":"dante","mode":"semantic"})")).result(),
+        http::status::bad_request);
+    EXPECT_EQ(
+        handler
+            .handle(makeRequest(http::verb::post, "/api/search", R"({"query":"dante","mode":"keyword","limit":101})"))
+            .result(),
+        http::status::bad_request);
 
     // valid /api/search -> 200
     const HttpResponse searchRes =

@@ -20,7 +20,7 @@ TEST(ThreadPoolTest, ReturnsFutureValuesAndPropagatesExceptions)
 
 TEST(ThreadPoolTest, GracefulShutdownCompletesQueuedTasks)
 {
-    std::atomic<int> counter{ 0 };
+    std::atomic<int> counter{0};
     {
         ThreadPool pool(4);
         for (int i = 0; i < 100; i++)
@@ -40,7 +40,7 @@ TEST(ThreadPoolTest, PauseAndResumeControlExecution)
     pool.pause();
     EXPECT_TRUE(pool.isPaused());
 
-    std::atomic<int> executed{ 0 };
+    std::atomic<int> executed{0};
     std::vector<std::future<void>> futures;
     for (int i = 0; i < 10; i++)
     {
@@ -53,7 +53,7 @@ TEST(ThreadPoolTest, PauseAndResumeControlExecution)
     pool.resume();
     EXPECT_FALSE(pool.isPaused());
 
-    for (auto& fut : futures)
+    for (auto &fut : futures)
     {
         fut.get();
     }
@@ -71,7 +71,7 @@ TEST(ThreadPoolTest, AddTaskAfterStopThrows)
 TEST(ThreadPoolTest, ConcurrentProducersStressTest)
 {
     ThreadPool pool(4);
-    std::atomic<int> total{ 0 };
+    std::atomic<int> total{0};
     std::vector<std::thread> producers;
 
     for (int p = 0; p < 8; p++)
@@ -84,14 +84,14 @@ TEST(ThreadPoolTest, ConcurrentProducersStressTest)
                 {
                     localFutures.push_back(pool.addTask([&total]() { total.fetch_add(1, std::memory_order_relaxed); }));
                 }
-                for (auto& fut : localFutures)
+                for (auto &fut : localFutures)
                 {
                     fut.get();
                 }
             });
     }
 
-    for (auto& producer : producers)
+    for (auto &producer : producers)
     {
         producer.join();
     }

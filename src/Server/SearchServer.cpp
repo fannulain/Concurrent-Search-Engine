@@ -15,9 +15,9 @@ using tcp = net::ip::tcp;
 class Listener : public std::enable_shared_from_this<Listener>
 {
 private:
-    net::io_context& ioc;
+    net::io_context &ioc;
     tcp::acceptor acceptor;
-    RequestHandler& requestHandler;
+    RequestHandler &requestHandler;
 
     void doAccept()
     {
@@ -43,7 +43,7 @@ private:
     }
 
 public:
-    Listener(net::io_context& ioc, const tcp::endpoint& endpoint, RequestHandler& requestHandler)
+    Listener(net::io_context &ioc, const tcp::endpoint &endpoint, RequestHandler &requestHandler)
         : ioc(ioc), acceptor(net::make_strand(ioc)), requestHandler(requestHandler)
     {
         acceptor.open(endpoint.protocol());
@@ -57,7 +57,7 @@ public:
 
 } // namespace
 
-SearchServer::SearchServer(uint16_t port, int serverThreads, RequestHandler& requestHandler)
+SearchServer::SearchServer(uint16_t port, int serverThreads, RequestHandler &requestHandler)
     : port(port), serverThreads(serverThreads), requestHandler(requestHandler), ioc(serverThreads),
       signals(ioc, SIGINT, SIGTERM)
 {
@@ -72,10 +72,10 @@ void SearchServer::start()
 {
     if (isRunning.exchange(true)) return;
 
-    std::make_shared<Listener>(ioc, tcp::endpoint{ net::ip::address_v4::any(), port }, requestHandler)->start();
+    std::make_shared<Listener>(ioc, tcp::endpoint{net::ip::address_v4::any(), port}, requestHandler)->start();
 
     signals.async_wait(
-        [this](const boost::system::error_code&, int signal)
+        [this](const boost::system::error_code &, int signal)
         {
             std::cout << "Received signal " << signal << ", shutting down" << std::endl;
             stop();

@@ -24,20 +24,20 @@ struct SearchResult
 class SearchEngine
 {
 private:
-    const Tokenizer& tokenizer;
+    const Tokenizer &tokenizer;
 
-    static std::string buildSnippet(std::string_view text, const std::vector<WeightedTerm>& terms);
+    static std::string buildSnippet(std::string_view text, const std::vector<WeightedTerm> &terms);
 
 public:
-    explicit SearchEngine(const Tokenizer& tokenizer);
+    explicit SearchEngine(const Tokenizer &tokenizer);
 
     std::vector<WeightedTerm> buildWeightedTerms(std::string_view originalQuery,
-                                                   const std::vector<std::string>& expandedTerms) const;
+                                                 const std::vector<std::string> &expandedTerms) const;
 
-    std::vector<SearchResult> search(const IndexSnapshot& snapshot, const std::vector<WeightedTerm>& terms,
+    std::vector<SearchResult> search(const IndexSnapshot &snapshot, const std::vector<WeightedTerm> &terms,
                                      size_t limit) const;
 
-    std::vector<SearchResult> searchQuery(const IndexSnapshot& snapshot, std::string_view query, size_t limit) const;
+    std::vector<SearchResult> searchQuery(const IndexSnapshot &snapshot, std::string_view query, size_t limit) const;
 };
 
 #endif // SEARCHENGINE_H
