@@ -26,6 +26,8 @@ public:
 
     uint32_t add(DocumentMeta meta);
     DocumentMeta get(uint32_t internalId) const;
+    uint32_t getTokenCount(uint32_t internalId) const;
+    std::string getDocId(uint32_t internalId) const;
     uint32_t size() const;
     std::string readText(uint32_t internalId) const;
 };

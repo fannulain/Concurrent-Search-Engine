@@ -31,6 +31,7 @@ add_library(cse_core STATIC
   src/Index/IndexerService.cpp
   src/Index/Tokenizer.cpp
   src/Ollama/OllamaService.cpp
+  src/Search/SearchEngine.cpp
   src/Server/ClientSession.cpp
   src/Server/RequestHandler.cpp
   src/Server/SearchServer.cpp

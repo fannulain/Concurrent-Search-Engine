@@ -22,6 +22,26 @@ DocumentMeta DocumentStore::get(uint32_t internalId) const
     return docs[internalId];
 }
 
+uint32_t DocumentStore::getTokenCount(uint32_t internalId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mtx);
+    if (internalId >= docs.size())
+    {
+        throw std::out_of_range("Document ID out of range");
+    }
+    return docs[internalId].tokenCount;
+}
+
+std::string DocumentStore::getDocId(uint32_t internalId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mtx);
+    if (internalId >= docs.size())
+    {
+        throw std::out_of_range("Document ID out of range");
+    }
+    return docs[internalId].docId;
+}
+
 uint32_t DocumentStore::size() const
 {
     std::shared_lock<std::shared_mutex> lock(mtx);
