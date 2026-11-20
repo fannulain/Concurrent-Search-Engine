@@ -17,7 +17,8 @@ int main()
         Tokenizer tokenizer;
         IndexerService indexerService(tokenizer, config.datasetPath, config.indexBuckets);
         SearchEngine searchEngine(tokenizer);
-        OllamaService ollamaService(config.ollamaHost, config.ollamaPort, config.ollamaModel, config.ollamaTimeoutMs);
+        OllamaService ollamaService(config.ollamaHost, config.ollamaPort, config.ollamaModel, tokenizer,
+                                    config.ollamaTimeoutMs);
         RequestHandler requestHandler(ollamaService, indexerService, searchEngine);
         SearchServer server(config.port, config.serverThreads, requestHandler);
 
