@@ -19,7 +19,7 @@ RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 FROM build AS test
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgtest-dev clang-format clang \
+    && apt-get install -y --no-install-recommends libgtest-dev clang-format clang libclang-rt-18-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY .clang-format .
@@ -33,8 +33,9 @@ RUN clang-format --dry-run --Werror \
     && cmake --build build-test --parallel \
     && ctest --test-dir build-test --output-on-failure \
     && cmake -S . -B build-tsan -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON \
-    && cmake --build build-tsan --parallel \
-    && ctest --test-dir build-tsan --output-on-failure
+    && cmake --build build-tsan --parallel
+
+CMD ["setarch", "x86_64", "-R", "ctest", "--test-dir", "build-tsan", "--output-on-failure"]
 
 # ---------- Runtime stage ----------
 FROM ubuntu:24.04 AS runtime
