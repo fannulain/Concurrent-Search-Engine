@@ -50,4 +50,21 @@ target_compile_options(cse_core PUBLIC
 add_executable(search_server src/Source.cpp)
 target_link_libraries(search_server PRIVATE cse_core)
 
+option(CSE_BUILD_TESTS "Build unit tests" OFF)
+if(CSE_BUILD_TESTS)
+  enable_testing()
+  find_package(GTest REQUIRED)
+  include(GoogleTest)
+
+  add_executable(cse_tests
+    tests/ConcurrentInvertedIndexTest.cpp
+    tests/IndexerAndSearchTest.cpp
+    tests/RequestHandlerTest.cpp
+    tests/ThreadPoolTest.cpp
+    tests/TokenizerTest.cpp
+  )
+  target_link_libraries(cse_tests PRIVATE cse_core GTest::gtest_main)
+  gtest_discover_tests(cse_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
 install(TARGETS search_server RUNTIME DESTINATION bin)
