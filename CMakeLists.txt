@@ -26,6 +26,7 @@ find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(cse_core STATIC
   src/Config/Config.cpp
+  src/Index/ConcurrentInvertedIndex.cpp
   src/Index/DocumentStore.cpp
   src/Index/Tokenizer.cpp
   src/Ollama/OllamaService.cpp
