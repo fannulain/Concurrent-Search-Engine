@@ -94,7 +94,12 @@ def main() -> int:
 
         for run_idx in range(1, args.runs + 1):
             t0 = time.perf_counter()
-            resp = session.post(f"{base_url}/api/index", json={"threads": thread_count}, timeout=600)
+            resp = session.post(
+                f"{base_url}/api/index",
+                json={"threads": thread_count},
+                headers={"Connection": "close"},
+                timeout=600,
+            )
             client_ms = (time.perf_counter() - t0) * 1000.0
             if resp.status_code != 200:
                 print(f"Indexing failed (HTTP {resp.status_code}): {resp.text}", file=sys.stderr)
