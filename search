@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""CLI search client for Concurrent Search Engine."""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import socket
+import ssl
+import struct
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def normalize_http_url(host: str) -> str:
+    if not host.startswith(("http://", "https://")):
+        host = "http://" + host
+    return host.rstrip("/")
+
+
+def print_results(results: list, time_ms: int) -> None:
+    if not results:
+        print("No results found.")
+    else:
+        for idx, item in enumerate(results, start=1):
+            doc_id = item.get("doc_id", "unknown")
+            score = float(item.get("score", 0.0))
+            snippet = item.get("snippet", "")
+            print(f"{idx}. [{doc_id}] (score: {score:.3f})")
+            print(f"   {snippet}")
+    print(f"\nCompleted in {time_ms} ms")
+
+
+def run_keyword_mode(host: str, query: str, limit: int) -> int:
+    url = f"{host}/api/search"
+    payload = json.dumps({"query": query, "mode": "keyword", "limit": limit}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        err_text = exc.read().decode("utf-8", errors="replace")
+        try:
+            err_msg = json.loads(err_text).get("error", err_text)
+        except json.JSONDecodeError:
+            err_msg = err_text
+        print(f"Server error (HTTP {exc.code}): {err_msg}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Connection error: {exc.reason}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"Request failed: {exc}", file=sys.stderr)
+        return 1
+
+    results = body.get("results", [])
+    time_ms = int(body.get("time_ms", 0))
+    print_results(results, time_ms)
+    return 0
+
+
+class StdlibWebSocketClient:
+    """Minimal RFC 6455 client for environments without websocket-client."""
+
+    def __init__(self, ws_url: str, timeout: float = 60.0) -> None:
+        parsed = urllib.parse.urlparse(ws_url)
+        use_tls = parsed.scheme == "wss"
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError(f"Invalid WebSocket URL: {ws_url}")
+        port = parsed.port or (443 if use_tls else 80)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        raw_sock = socket.create_connection((hostname, port), timeout=timeout)
+        if use_tls:
+            ctx = ssl.create_default_context()
+            self.sock = ctx.wrap_socket(raw_sock, server_hostname=hostname)
+        else:
+            self.sock = raw_sock
+
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        host_header = f"{hostname}:{port}"
+        handshake = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host_header}\r\n"
+            f"Upgrade: websocket\r\n"
+            f"Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            f"Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        self.sock.sendall(handshake.encode("ascii"))
+
+        response = bytearray()
+        while b"\r\n\r\n" not in response:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("WebSocket handshake closed unexpectedly")
+            response.extend(chunk)
+
+        header_end = response.index(b"\r\n\r\n")
+        header_text = response[:header_end].decode("ascii", errors="replace")
+        self.extra_buffer = bytes(response[header_end + 4 :])
+
+        status_line = header_text.splitlines()[0] if header_text else ""
+        if "101" not in status_line:
+            raise ConnectionError(f"WebSocket handshake failed: {status_line}")
+
+        expected_accept = base64.b64encode(
+            hashlib.sha1((key + WS_GUID).encode("ascii")).digest()
+        ).decode("ascii")
+        if expected_accept not in header_text:
+            raise ConnectionError("Invalid Sec-WebSocket-Accept header")
+
+    def _recv_exact(self, length: int) -> bytes:
+        buf = bytearray()
+        if self.extra_buffer:
+            take = min(length, len(self.extra_buffer))
+            buf.extend(self.extra_buffer[:take])
+            self.extra_buffer = self.extra_buffer[take:]
+        while len(buf) < length:
+            chunk = self.sock.recv(length - len(buf))
+            if not chunk:
+                raise ConnectionError("WebSocket connection closed by server")
+            buf.extend(chunk)
+        return bytes(buf)
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
+        mask_key = os.urandom(4)
+        length = len(payload)
+        header = bytearray([0x80 | opcode])
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.append(0x80 | 126)
+            header.extend(struct.pack("!H", length))
+        else:
+            header.append(0x80 | 127)
+            header.extend(struct.pack("!Q", length))
+        header.extend(mask_key)
+
+        masked = bytes(payload[i] ^ mask_key[i % 4] for i in range(length))
+        self.sock.sendall(bytes(header) + masked)
+
+    def send_text(self, text: str) -> None:
+        self._send_frame(0x1, text.encode("utf-8"))
+
+    def recv_text(self) -> str:
+        fragments = bytearray()
+        while True:
+            first_two = self._recv_exact(2)
+            fin = (first_two[0] & 0x80) != 0
+            opcode = first_two[0] & 0x0F
+            masked = (first_two[1] & 0x80) != 0
+            payload_len = first_two[1] & 0x7F
+
+            if payload_len == 126:
+                payload_len = struct.unpack("!H", self._recv_exact(2))[0]
+            elif payload_len == 127:
+                payload_len = struct.unpack("!Q", self._recv_exact(8))[0]
+
+            mask_key = self._recv_exact(4) if masked else b""
+            payload = self._recv_exact(payload_len) if payload_len > 0 else b""
+            if masked:
+                payload = bytes(payload[i] ^ mask_key[i % 4] for i in range(len(payload)))
+
+            if opcode == 0x8:
+                raise ConnectionError("WebSocket closed by server")
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0xA:
+                continue
+
+            fragments.extend(payload)
+            if fin:
+                return fragments.decode("utf-8")
+
+    def close(self) -> None:
+        try:
+            self._send_frame(0x8, b"")
+        except Exception:
+            pass
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+
+def handle_stream_message(raw_message: str) -> tuple[bool, int]:
+    msg = json.loads(raw_message)
+    stage = msg.get("stage", "")
+    data = msg.get("data", {})
+
+    if stage == "error":
+        print(f"[error] {data.get('message', 'Unknown error')}", file=sys.stderr)
+        return True, 1
+
+    if stage == "query_expansion":
+        terms = data.get("expanded_terms", [])
+        err = data.get("error")
+        if err:
+            print(f"[query_expansion] fallback ({err}); expanded_terms=[]")
+        else:
+            print(f"[query_expansion] expanded_terms={terms}")
+        return False, 0
+
+    if stage == "keyword_search":
+        results = data.get("results", [])
+        time_ms = int(data.get("time_ms", 0))
+        print(f"[keyword_search] {len(results)} result(s) in {time_ms} ms")
+        print_results(results, time_ms)
+        return False, 0
+
+    if stage == "done":
+        print("[done]")
+        return True, 0
+
+    return False, 0
+
+
+def run_stream_mode(host: str, query: str, limit: int) -> int:
+    parsed = urllib.parse.urlparse(host)
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    ws_url = f"{ws_scheme}://{parsed.netloc}/ws/search"
+    request_payload = json.dumps({"query": query, "limit": limit})
+
+    try:
+        import websocket as ws_lib  # type: ignore
+
+        conn = ws_lib.create_connection(ws_url, timeout=60)
+        try:
+            conn.send(request_payload)
+            while True:
+                raw_msg = conn.recv()
+                if not raw_msg:
+                    print("WebSocket closed before completion", file=sys.stderr)
+                    return 1
+                finished, exit_code = handle_stream_message(raw_msg)
+                if finished:
+                    return exit_code
+        finally:
+            conn.close()
+    except ImportError:
+        try:
+            conn = StdlibWebSocketClient(ws_url, timeout=60.0)
+            try:
+                conn.send_text(request_payload)
+                while True:
+                    raw_msg = conn.recv_text()
+                    finished, exit_code = handle_stream_message(raw_msg)
+                    if finished:
+                        return exit_code
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"WebSocket error: {exc}", file=sys.stderr)
+            return 1
+    except Exception as exc:
+        print(f"WebSocket error: {exc}", file=sys.stderr)
+        return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Search client for Concurrent Search Engine")
+    parser.add_argument("query", help="Search query text")
+    parser.add_argument(
+        "--mode",
+        choices=["keyword", "stream"],
+        default="keyword",
+        help="Search mode: REST keyword or WebSocket streaming (default: keyword)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of results in [1, 100] (default: 10)",
+    )
+    parser.add_argument(
+        "--host",
+        default="http://localhost:8080",
+        help="Server base URL (default: http://localhost:8080)",
+    )
+
+    args = parser.parse_args()
+    if not args.query.strip():
+        print("Query must not be empty.", file=sys.stderr)
+        return 1
+    if args.limit < 1 or args.limit > 100:
+        print("Limit must be between 1 and 100.", file=sys.stderr)
+        return 1
+
+    host = normalize_http_url(args.host)
+    if args.mode == "stream":
+        return run_stream_mode(host, args.query, args.limit)
+    return run_keyword_mode(host, args.query, args.limit)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
