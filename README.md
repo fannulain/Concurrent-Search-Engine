@@ -129,12 +129,13 @@ Send `{"query": "divine comedy inferno"}` to `ws://localhost:8080/ws/search` (or
 
 ### Via Docker (`test` target: clang-format + Release GoogleTest + ThreadSanitizer)
 ```bash
-docker build --target test --progress=plain .
+docker build --target test -t cse-test --progress=plain .
+docker run --rm --security-opt seccomp=unconfined cse-test
 ```
 
 ### Local Build (Ubuntu 24.04)
 ```bash
-sudo apt install g++ cmake ninja-build libboost-dev nlohmann-json3-dev libgtest-dev clang-format
+sudo apt install g++ clang libclang-rt-18-dev cmake ninja-build libboost-dev nlohmann-json3-dev libgtest-dev clang-format
 
 # Release build + unit tests
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCSE_BUILD_TESTS=ON
@@ -142,9 +143,9 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
 # ThreadSanitizer (TSan) build + concurrency tests
-cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON
+cmake -S . -B build-tsan -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON
 cmake --build build-tsan --parallel
-ctest --test-dir build-tsan --output-on-failure
+setarch x86_64 -R ctest --test-dir build-tsan --output-on-failure
 ```
 
 ---
@@ -160,6 +161,8 @@ python3 bench/bench_search.py --host http://localhost:8080
 ```
 
 CSV metrics, PNG plots (`index_build_time.png`, `index_speedup_efficiency.png`, `search_throughput.png`, `search_latency_p95.png`), and `search_quality_table.md` are generated in `bench/results/`.
+
+Measured scalability results, search quality evaluation, and bottleneck analysis are documented in [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
 
