@@ -37,7 +37,7 @@ QUALITY_CASES = [
     ("french revolution guillotine", "Historical or literary texts on the French Revolution", ["revolution", "french", "france"]),
     ("genesis creation light earth", "King James Bible / Genesis passages", ["genesis", "earth", "light", "god"]),
     ("alice wonderland white rabbit", "Lewis Carroll's Alice in Wonderland", ["alice", "rabbit", "wonderland"]),
-    ("quantum_nonexistent_xyz_term", "Empty result set (no matches)", []),
+    ("xqzvnonexistentkplm", "Empty result set (no matches)", []),
     ("the and of in", "Empty result set (stop words only)", []),
 ]
 
