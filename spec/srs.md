@@ -61,16 +61,19 @@ See Section 11 (Glossary). Primary references:
 ### 4.1 Components
 | Component | Responsibility |
 |---|---|
-| `SearchServer` | HTTP/WebSocket routing (Boost.Beast), request validation, JSON serialization, owns the active index snapshot |
-| `ThreadPool` | Custom fixed-size pool of worker threads with a task queue; returns `std::future` per task |
-| `IndexerService` | Scans the dataset, splits books into documents, distributes parse tasks to an Indexer `ThreadPool` with $N$ threads |
+| `SearchServer` | Boost.Asio acceptor & signal handling, manages the network `ThreadPool` |
+| `ClientSession` / `WebSocketSession` | Boost.Beast HTTP and WebSocket session handlers |
+| `RequestHandler` | REST routing, request validation, JSON serialization, owns the active index snapshot |
+| `ThreadPool` / `TaskQueue` | Custom fixed-size pool of worker threads with a thread-safe `TaskQueue`; returns `std::future` per task |
+| `IndexerService` | Recursively scans the dataset, strips Gutenberg markers, splits books into documents, distributes tasks to an Indexer `ThreadPool` with $N$ threads |
 | `Tokenizer` | Text normalization: lowercase, strip punctuation/digits, stop-word filtering |
 | `ConcurrentInvertedIndex` | Custom thread-safe inverted index with striped locking (Section 7.1) |
-| `DocumentStore` | Thread-safe registry of document metadata (doc_id, file path, byte offset, length, token count) |
+| `DocumentStore` | Thread-safe registry of document metadata (docId, filePath, byteOffset, byteLength, tokenCount) |
 | `SearchEngine` | Executes keyword search over an index snapshot, computes TF-IDF scores, builds snippets |
 | `OllamaService` | HTTP client for Ollama; query expansion via `/api/generate`; availability check; single-thread worker |
+| `Config` | Parses environment variables into server, dataset, index, and Ollama settings |
 | Web UI (Nginx) | Search form, results list, visualization of pipeline stages; reverse-proxies `/api` and `/ws` to the server |
-| CLI client (Python) | Command-line search via REST and/or WebSocket |
+| CLI client (Python) | Command-line search (`./search`) via REST (`keyword`) and WebSocket (`stream`) |
 
 ### 4.2 UML Diagrams
 All diagrams are stored in `docs/diagrams/`: PlantUML sources in `md/`, rendered images in `svg/`:
@@ -234,7 +237,7 @@ The `ConcurrentInvertedIndex` is divided into a fixed number of buckets (default
 ### 8.1 Dataset
 - **DR-1:** Source: **Project Gutenberg** English plain-text books (`.txt`, UTF-8).
 - **DR-2:** Volume: minimum **1 GB** of text and at least **10,000 documents** (target ≥ 2 GB).
-- **DR-3:** A Python script `scripts/download_dataset.py` downloads books into `./data/` and strips the Project Gutenberg license header/footer (`*** START OF ... ***` / `*** END OF ... ***`).
+- **DR-3:** A Python script `scripts/download_dataset.py` downloads books into `./data/` and strips the Project Gutenberg license header/footer (`*** START OF ... ***` / `*** END OF ... ***`). `IndexerService` also scans `DATASET_PATH` recursively and detects/strips these markers on the fly if raw Gutenberg `.txt` files are placed in subdirectories.
 - **DR-4:** The dataset is mounted into the server container read-only: `./data:/data:ro`. The path is configured via env `DATASET_PATH` (default `/data`).
 
 ### 8.2 Document Model
@@ -291,7 +294,7 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
 - **NFR-R3:** Ollama failures MUST be handled by the fallback (UC-5 A1).
 
 ### 10.3 Code Quality and Maintainability
-- **NFR-Q1:** Code follows the Google C++ Style Guide and is formatted with `clang-format` (`.clang-format` in the repo, `BasedOnStyle: Google`). Python code is formatted with `black`.
+- **NFR-Q1:** C++ code follows a unified Microsoft/Allman style (`PascalCase` files/classes, `camelCase` methods/variables, 4-space indentation, Allman braces, max 120 columns) enforced with `clang-format` (`.clang-format` in the repo). Python code adheres to PEP 8 / `black`.
 - **NFR-Q2:** Unit tests (GoogleTest) cover `ThreadPool`, `Tokenizer`, `ConcurrentInvertedIndex`, ranking and JSON contract serialization. Concurrency tests run the index with many writer/reader threads.
 - **NFR-Q3:** CI (GitHub Actions) builds the project, runs tests normally and under ThreadSanitizer, and checks formatting.
 - **NFR-Q4:** A search quality table is produced: test query, expected result, actual result (required by the report).

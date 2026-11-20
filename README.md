@@ -1,114 +1,196 @@
 # Concurrent Search Engine
 
-A containerized, multi-threaded search engine in C++20. Coursework for *Parallel Computing* (KPI, IASA, 2026–2027).
+A containerized, multi-threaded search engine in C++20 with parallel inverted index construction, striped locking, REST & WebSocket streaming APIs, and local LLM query expansion via Ollama. Coursework for *Parallel Computing* (KPI, IASA, 2026–2027).
 
-- A custom thread pool builds an inverted index in parallel.
-- The inverted index is our own thread-safe data structure (striped locking).
-- The server handles REST and WebSocket requests concurrently.
-- A local LLM ([Ollama](https://ollama.com/)) expands queries.
+- **Custom `ThreadPool` & `TaskQueue`:** Built from scratch on `std::thread`, `std::mutex`, and `std::condition_variable` with `std::future` support and graceful shutdown.
+- **Custom `ConcurrentInvertedIndex`:** Striped locking across 64 cache-aligned `std::shared_mutex` buckets for parallel writes and lock-shared concurrent reads.
+- **Atomic Snapshot Isolation:** Index rebuilds swap `std::atomic<std::shared_ptr<const IndexSnapshot>>` without blocking active searches.
+- **Local LLM Query Expansion:** Sequential 1-thread Ollama worker (`/api/generate`) enriches queries with keywords and synonyms, streaming pipeline stages over `/ws/search`.
+- **Dual Clients:** Interactive Web UI (Nginx + vanilla JS) and Python CLI client (`./search`).
 
-The full specification is in [spec/srs.md](spec/srs.md). The UML diagrams are in [docs/diagrams](docs/diagrams).
+The full specification is in [spec/srs.md](spec/srs.md). Architecture details are in [docs/architecture.md](docs/architecture.md), and UML diagrams are in [docs/diagrams](docs/diagrams).
 
-> **Status:** First attestation. `docker compose up` starts the whole system, and `GET /api/health` is implemented. The other endpoints return `501 Not Implemented`.
+---
 
 ## Architecture
 
-| Service | Description | Host port |
+| Service | Description | Host Port |
 |---|---|---|
-| `server` | C++20 search server (Boost.Beast) | `8080` |
-| `ollama` | Ollama LLM runtime | internal only |
-| `ollama-init` | One-shot job that pulls the model (`qwen2.5:0.5b`) and exits | — |
-| `web` | Nginx: Web UI + reverse proxy for `/api` and `/ws` | `3000` |
+| `server` | C++20 search server (Boost.Beast HTTP + WebSocket) | `8080` |
+| `ollama` | Ollama LLM runtime (`qwen2.5:0.5b`) | internal only |
+| `ollama-init` | One-shot container pulling `OLLAMA_MODEL` | — |
+| `web` | Nginx serving Web UI + proxying `/api` and `/ws` | `3000` |
+
+---
 
 ## Prerequisites
 
 - Docker Desktop / Docker Engine with Docker Compose v2
-- ~2 GB of free disk space (images + LLM model)
+- ~2 GB free disk space (container images + `qwen2.5:0.5b` weights)
+- English `.txt` dataset placed under `./data/` (minimum 1 GB, >= 10,000 chunks; see below)
+- Optional (for CLI/benchmarks outside Docker): Python 3.10+ (`pip install -r requirements.txt`)
 
-## Quick start
+### Dataset Setup
+
+If `./data/` is empty, download Project Gutenberg plain-text books with:
+
+```bash
+python3 scripts/download_dataset.py --target-gb 1.5 --output data
+```
+
+Any `.txt` files placed under `./data/` (including subdirectories such as `data/D1.7GB/`) are scanned recursively, stripped of Project Gutenberg license headers/footers on the fly, and split into ~1,000-word searchable document chunks.
+
+---
+
+## Quick Start (Docker Compose)
 
 ```bash
 docker compose up --build
 ```
 
-The first start takes a few minutes: the server image is compiled and the `ollama-init` service downloads the LLM model (~400 MB). Ollama reports `true` only after the model download has finished.
+The first startup compiles the C++ server and pulls the `qwen2.5:0.5b` model (~400 MB) in `ollama-init`.
 
-Check the server:
+- **Web UI:** <http://localhost:3000>
+- **Server API:** <http://localhost:8080>
 
+Stop the stack:
+
+```bash
+docker compose down        # preserve downloaded Ollama models
+docker compose down -v     # also remove model volume
+```
+
+---
+
+## Configuration
+
+Environment variables configured for `server` in [docker-compose.yml](docker-compose.yml):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8080` | HTTP/WebSocket listen port |
+| `SERVER_THREADS` | CPU core count | Network `ThreadPool` worker threads |
+| `DATASET_PATH` | `/data` | Read-only dataset mount path |
+| `OLLAMA_URL` | `http://ollama:11434` | Ollama base URL |
+| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used for query expansion |
+| `OLLAMA_TIMEOUT_MS` | `30000` | HTTP timeout for `/api/generate` |
+| `INDEX_BUCKETS` | `64` | Striped lock bucket count (power of two) |
+
+---
+
+## REST API & WebSocket Usage
+
+### Health Check
 ```bash
 curl http://localhost:8080/api/health
 # {"ollama":true,"status":"ok"}
 ```
 
-Web UI: <http://localhost:3000>
+### Build Inverted Index
+```bash
+curl -X POST http://localhost:8080/api/index \
+  -H "Content-Type: application/json" \
+  -d '{"threads": 8}'
+# {"documents_indexed":265412,"status":"ok","time_ms":4120}
+```
 
-Stop the system:
+### Get Index Statistics
+```bash
+curl http://localhost:8080/api/stats
+# {"documents":265412,"index_build_time_ms":4120,"threads_used":8}
+```
+
+### Keyword Search (REST)
+```bash
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "divine comedy inferno", "mode": "keyword", "limit": 5}'
+# {"results":[{"doc_id":"1001_0","score":1.0,"snippet":"..."}],"time_ms":14}
+```
+
+### Streaming Search (WebSocket `/ws/search`)
+Send `{"query": "divine comedy inferno"}` to `ws://localhost:8080/ws/search` (or `ws://localhost:3000/ws/search`). The server streams three sequential JSON messages:
+1. `{"stage": "query_expansion", "data": {"original": "...", "expanded_terms": [...]}}`
+2. `{"stage": "keyword_search", "data": {"results": [...], "time_ms": ...}}`
+3. `{"stage": "done"}`
+
+---
+
+## CLI Client
 
 ```bash
-docker compose down        # keep the downloaded model
-docker compose down -v     # also remove the model volume
+./search "divine comedy inferno"
+./search "space stars" --mode stream --limit 5 --host http://localhost:8080
 ```
 
-## Configuration
+---
 
-These environment variables are set for the `server` service in [docker-compose.yml](docker-compose.yml):
+## Building & Testing
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `8080` | HTTP port |
-| `SERVER_THREADS` | number of CPU cores | Size of the network thread pool |
-| `DATASET_PATH` | `/data` | Dataset directory (bind-mounted from `./data`, read-only) |
-| `OLLAMA_URL` | `http://ollama:11434` | Ollama base URL |
-| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used for query expansion |
+### Via Docker (`test` target: clang-format + Release GoogleTest + ThreadSanitizer)
+```bash
+docker build --target test --progress=plain .
+```
 
-You can change the model with an env variable or a `.env` file, e.g. `OLLAMA_MODEL=llama3.2:1b docker compose up`.
+### Local Build (Ubuntu 24.04)
+```bash
+sudo apt install g++ cmake ninja-build libboost-dev nlohmann-json3-dev libgtest-dev clang-format
 
-## API (current state)
+# Release build + unit tests
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCSE_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 
-| Endpoint | Status |
-|---|---|
-| `GET /api/health` | ✅ `{"status": "ok", "ollama": true\|false}` |
-| `POST /api/index` | ⏳ 501 |
-| `POST /api/search` | ⏳ 501 |
-| `GET /api/stats` | ⏳ 501 |
-| `WS /ws/search` | ⏳ not available |
+# ThreadSanitizer (TSan) build + concurrency tests
+cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCSE_BUILD_TESTS=ON -DCSE_ENABLE_TSAN=ON
+cmake --build build-tsan --parallel
+ctest --test-dir build-tsan --output-on-failure
+```
 
-## Local build (without Docker)
+---
 
-You need a C++20 compiler, CMake ≥ 3.20, Boost ≥ 1.81 (headers) and nlohmann/json ≥ 3.11.
+## Scalability Benchmarks
+
+Install Python dependencies and run the benchmark suite against a running server:
 
 ```bash
-# Ubuntu 24.04
-sudo apt install g++ cmake ninja-build libboost-dev nlohmann-json3-dev
-
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-OLLAMA_URL=http://localhost:11434 ./build/search_server
+pip install -r requirements.txt
+python3 bench/bench_index.py --host http://localhost:8080
+python3 bench/bench_search.py --host http://localhost:8080
 ```
 
-To build with ThreadSanitizer, add `-DCSE_ENABLE_TSAN=ON`.
+CSV metrics, PNG plots (`index_build_time.png`, `index_speedup_efficiency.png`, `search_throughput.png`, `search_latency_p95.png`), and `search_quality_table.md` are generated in `bench/results/`.
 
-## Project structure
+---
 
-```
+## Project Structure
+
+```text
 .
-├── CMakeLists.txt          # C++ build
-├── Dockerfile              # multi-stage server image
-├── docker-compose.yml      # system topology
-├── src/                    # C++ server sources
-│   ├── main.cc             # entry point, network thread pool
-│   ├── config.*            # env configuration
-│   ├── thread_pool.*       # custom ThreadPool
-│   ├── http_server.*       # Boost.Beast listener / session
-│   ├── request_handler.*   # REST routing
-│   └── ollama_client.*     # Ollama HTTP client
-├── web/                    # Nginx config + Web UI
-├── data/                   # dataset (not tracked in git)
-├── docs/diagrams/          # UML diagrams (PlantUML + SVG)
-└── spec/srs.md             # Software Requirements Specification
+├── .github/workflows/ci.yml      # GitHub Actions (format, Release, TSan)
+├── CMakeLists.txt                # C++20 build & GoogleTest configuration
+├── Dockerfile                    # Multi-stage build, test (TSan), runtime
+├── docker-compose.yml            # Full stack topology
+├── search                        # Python CLI search client
+├── bench/                        # Scalability & quality benchmark scripts
+├── scripts/                      # Project Gutenberg dataset downloader
+├── src/
+│   ├── Source.cpp                # Application entry point
+│   ├── Config/                   # Environment configuration
+│   ├── ThreadPool/               # Custom TaskQueue & ThreadPool
+│   ├── Index/                    # Tokenizer, DocumentStore, ConcurrentInvertedIndex, IndexerService
+│   ├── Search/                   # TF-IDF SearchEngine & snippet extractor
+│   ├── Ollama/                   # Ollama HTTP client & single-thread expansion queue
+│   └── Server/                   # SearchServer, RequestHandler, ClientSession, WebSocketSession
+├── tests/                        # GoogleTest unit & concurrency tests
+├── web/                          # Nginx reverse proxy & Web UI static files
+├── docs/                         # Architecture docs, benchmarks, UML diagrams
+└── spec/srs.md                   # Software Requirements Specification
 ```
 
-## Code style
+---
 
-- C++: [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html), enforced with `clang-format` (see [.clang-format](.clang-format)).
-- Commits: [Conventional Commits](https://www.conventionalcommits.org/).
+## Code Style & Commits
+
+- **C++:** Unified Microsoft/Allman style (`PascalCase` files/classes, `camelCase` methods/variables, 4-space indentation, Allman braces, 120-column limit) verified by [`.clang-format`](.clang-format).
+- **Commits:** Atomic [Conventional Commits](https://www.conventionalcommits.org/).
