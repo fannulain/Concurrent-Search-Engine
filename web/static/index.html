@@ -4,57 +4,124 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Concurrent Search Engine</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; color: #222; }
-    h1 { font-size: 1.6rem; }
-    .status { display: flex; gap: 1rem; margin: 1.5rem 0; }
-    .card { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
-    .label { font-size: .85rem; color: #666; }
-    .value { font-size: 1.3rem; font-weight: 600; margin-top: .3rem; }
-    .ok { color: #1a7f37; } .fail { color: #cf222e; } .pending { color: #9a6700; }
-    button { padding: .5rem 1rem; cursor: pointer; }
-    code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 4px; }
-  </style>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>Concurrent Search Engine</h1>
-  <p>Web UI placeholder. Search and the pipeline visualization will be added later.</p>
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>Concurrent Search Engine</h1>
+        <p class="subtitle">Multi-threaded Inverted Index &amp; Ollama LLM Query Expansion</p>
+      </div>
+      <div class="header-actions">
+        <span id="wsBadge" class="badge badge-pending">WS: connecting...</span>
+        <button id="refreshBtn" type="button" class="btn btn-secondary">Refresh Status</button>
+      </div>
+    </header>
 
-  <div class="status">
-    <div class="card">
-      <div class="label">Search server</div>
-      <div id="server" class="value pending">checking…</div>
-    </div>
-    <div class="card">
-      <div class="label">Ollama LLM</div>
-      <div id="ollama" class="value pending">checking…</div>
-    </div>
+    <section class="status-grid" aria-label="System status">
+      <div class="stat-card">
+        <div class="stat-label">Search Server</div>
+        <div id="serverStatus" class="stat-value pending">checking...</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Ollama LLM</div>
+        <div id="ollamaStatus" class="stat-value pending">checking...</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Indexed Documents</div>
+        <div id="docsCount" class="stat-value">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Last Build Time</div>
+        <div id="buildTime" class="stat-value">0 ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Index Threads</div>
+        <div id="threadsUsed" class="stat-value">0</div>
+      </div>
+    </section>
+
+    <section class="panel index-panel" aria-label="Index management">
+      <div class="index-controls">
+        <div class="index-title">
+          <strong>Index Builder</strong>
+          <span class="muted">Build or rebuild the parallel inverted index</span>
+        </div>
+        <form id="indexForm" class="index-form">
+          <label for="threadsInput">Threads (1-64):</label>
+          <input id="threadsInput" type="number" min="1" max="64" value="4" required>
+          <button id="buildIndexBtn" type="submit" class="btn btn-secondary">Build Index</button>
+        </form>
+      </div>
+      <div id="indexMessage" class="feedback hidden" role="status"></div>
+    </section>
+
+    <section class="panel search-panel" aria-label="Search">
+      <form id="searchForm" class="search-form">
+        <input id="queryInput" type="text" placeholder="Enter search query (e.g. divine comedy inferno)..." required autocomplete="off">
+        <select id="limitSelect" aria-label="Result limit">
+          <option value="5">Top 5</option>
+          <option value="10" selected>Top 10</option>
+          <option value="20">Top 20</option>
+          <option value="50">Top 50</option>
+        </select>
+        <select id="modeSelect" aria-label="Search mode">
+          <option value="stream" selected>WebSocket Streaming (LLM)</option>
+          <option value="keyword">REST Keyword Only</option>
+        </select>
+        <button id="searchBtn" type="submit" class="btn btn-primary">Search</button>
+      </form>
+      <div id="searchError" class="feedback feedback-error hidden" role="alert"></div>
+    </section>
+
+    <section class="panel pipeline-panel" aria-label="Search pipeline">
+      <div class="panel-header">
+        <h2>Pipeline Stages</h2>
+        <span id="pipelineSummary" class="muted">Idle</span>
+      </div>
+      <div class="pipeline-steps">
+        <div id="stageExpansion" class="stage-card stage-pending">
+          <div class="stage-head">
+            <span class="stage-name">1. query_expansion</span>
+            <span class="stage-state">pending</span>
+          </div>
+          <div class="stage-meta" id="stageExpansionMeta">Waiting for query</div>
+          <div class="chip-list" id="expandedTermsList"></div>
+        </div>
+
+        <div class="stage-arrow" aria-hidden="true">&rarr;</div>
+
+        <div id="stageSearch" class="stage-card stage-pending">
+          <div class="stage-head">
+            <span class="stage-name">2. keyword_search</span>
+            <span class="stage-state">pending</span>
+          </div>
+          <div class="stage-meta" id="stageSearchMeta">Waiting for terms</div>
+        </div>
+
+        <div class="stage-arrow" aria-hidden="true">&rarr;</div>
+
+        <div id="stageDone" class="stage-card stage-pending">
+          <div class="stage-head">
+            <span class="stage-name">3. done</span>
+            <span class="stage-state">pending</span>
+          </div>
+          <div class="stage-meta" id="stageDoneMeta">Pipeline idle</div>
+        </div>
+      </div>
+      <div id="fallbackBanner" class="feedback feedback-warn hidden" role="status"></div>
+    </section>
+
+    <section class="panel results-panel" aria-label="Search results">
+      <div class="panel-header">
+        <h2>Results</h2>
+        <span id="resultsMeta" class="muted">No search executed yet</span>
+      </div>
+      <div id="resultsList" class="results-list"></div>
+    </section>
   </div>
 
-  <button id="refresh">Refresh</button>
-  <p class="label">Source: <code>GET /api/health</code></p>
-
-  <script>
-    function set(id, ok, text) {
-      const el = document.getElementById(id);
-      el.textContent = text;
-      el.className = 'value ' + (ok ? 'ok' : 'fail');
-    }
-
-    async function checkHealth() {
-      try {
-        const res = await fetch('/api/health');
-        const body = await res.json();
-        set('server', res.ok && body.status === 'ok', res.ok ? 'OK' : 'HTTP ' + res.status);
-        set('ollama', body.ollama === true, body.ollama ? 'available' : 'unavailable');
-      } catch (e) {
-        set('server', false, 'unreachable');
-        set('ollama', false, 'unknown');
-      }
-    }
-
-    document.getElementById('refresh').addEventListener('click', checkHealth);
-    checkHealth();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
