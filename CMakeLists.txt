@@ -25,11 +25,12 @@ find_package(Boost 1.81 REQUIRED CONFIG)
 find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(cse_core STATIC
-  src/config.cc
-  src/http_server.cc
-  src/ollama_client.cc
-  src/request_handler.cc
-  src/thread_pool.cc
+  src/Config/Config.cpp
+  src/Ollama/OllamaService.cpp
+  src/Server/ClientSession.cpp
+  src/Server/RequestHandler.cpp
+  src/Server/SearchServer.cpp
+  src/ThreadPool/ThreadPool.cpp
 )
 target_include_directories(cse_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(cse_core PUBLIC
@@ -41,7 +42,7 @@ target_compile_options(cse_core PUBLIC
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
 )
 
-add_executable(search_server src/main.cc)
+add_executable(search_server src/Source.cpp)
 target_link_libraries(search_server PRIVATE cse_core)
 
 install(TARGETS search_server RUNTIME DESTINATION bin)
