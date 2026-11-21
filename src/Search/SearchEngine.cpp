@@ -12,12 +12,27 @@ namespace
 
 constexpr size_t SNIPPET_TARGET_LENGTH = 200;
 constexpr size_t SNIPPET_LOOKBACK = 60;
+constexpr double BM25_K1 = 1.2;
+constexpr double BM25_B = 0.75;
 
 struct ScoredCandidate
 {
     uint32_t internalId = 0;
-    std::string docId;
     double score = 0.0;
+};
+
+struct ScoreBufferResetGuard
+{
+    std::vector<double> &scores;
+    std::vector<uint32_t> &touched;
+    ~ScoreBufferResetGuard()
+    {
+        for (const uint32_t id : touched)
+        {
+            scores[id] = 0.0;
+        }
+        touched.clear();
+    }
 };
 
 size_t findFirstTermMatchOffset(std::string_view text, const std::unordered_set<std::string_view> &queryTerms)
@@ -181,54 +196,79 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot &snapshot, co
     const uint32_t totalDocs = snapshot.index.getDocumentCount();
     if (totalDocs == 0) return {};
 
-    std::unordered_map<uint32_t, double> docScores;
+    const double avgDocLen = std::max(1.0, snapshot.docs.getAverageTokenCount());
+    const size_t requiredSize = std::max<size_t>(totalDocs, snapshot.docs.size());
+
+    thread_local std::vector<double> scoreBuffer;
+    thread_local std::vector<uint32_t> touchedIds;
+    if (scoreBuffer.size() < requiredSize)
+    {
+        scoreBuffer.resize(requiredSize, 0.0);
+    }
+    ScoreBufferResetGuard resetGuard{scoreBuffer, touchedIds};
 
     for (const WeightedTerm &wt : terms)
     {
         if (wt.weight <= 0.0 || wt.term.empty()) continue;
 
-        const std::vector<Posting> postings = snapshot.index.getPostings(wt.term);
-        if (postings.empty()) continue;
+        snapshot.index.visitPostings(
+            wt.term,
+            [&](const std::vector<Posting> &postings)
+            {
+                if (postings.empty()) return;
 
-        const double df = static_cast<double>(postings.size());
-        const double idf = std::log(static_cast<double>(totalDocs) / df);
+                const double df = static_cast<double>(postings.size());
+                const double idf =
+                    std::log(1.0 + std::max(0.0, static_cast<double>(totalDocs) - df + 0.5) / (df + 0.5));
+                if (idf <= 0.0) return;
 
-        for (const Posting &posting : postings)
-        {
-            const uint32_t docTokenCount = snapshot.docs.getTokenCount(posting.docId);
-            if (docTokenCount == 0) continue;
+                for (const Posting &posting : postings)
+                {
+                    if (posting.docId >= scoreBuffer.size()) continue;
+                    const uint32_t docTokenCount = snapshot.docs.getTokenCount(posting.docId);
+                    if (docTokenCount == 0) continue;
 
-            const double tfNorm = static_cast<double>(posting.tf) / static_cast<double>(docTokenCount);
-            docScores[posting.docId] += wt.weight * tfNorm * idf;
-        }
+                    const double tf = static_cast<double>(posting.tf);
+                    const double docLen = static_cast<double>(docTokenCount);
+                    const double denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (docLen / avgDocLen));
+                    const double termScore = wt.weight * idf * (tf * (BM25_K1 + 1.0)) / denom;
+
+                    if (termScore > 0.0)
+                    {
+                        if (scoreBuffer[posting.docId] == 0.0)
+                        {
+                            touchedIds.push_back(posting.docId);
+                        }
+                        scoreBuffer[posting.docId] += termScore;
+                    }
+                }
+            });
     }
 
-    if (docScores.empty()) return {};
+    if (touchedIds.empty()) return {};
 
     double maxRawScore = 0.0;
-    for (const auto &[internalId, rawScore] : docScores)
+    for (const uint32_t internalId : touchedIds)
     {
-        (void)internalId;
-        if (rawScore > maxRawScore) maxRawScore = rawScore;
+        if (scoreBuffer[internalId] > maxRawScore) maxRawScore = scoreBuffer[internalId];
     }
 
     std::vector<ScoredCandidate> candidates;
-    candidates.reserve(docScores.size());
+    candidates.reserve(touchedIds.size());
 
-    for (const auto &[internalId, rawScore] : docScores)
+    for (const uint32_t internalId : touchedIds)
     {
-        // assign 1.0 when maxRawScore is 0 (for example when term occurs in every document)
-        const double normalizedScore = maxRawScore > 0.0 ? (rawScore / maxRawScore) : 1.0;
-        candidates.push_back(ScoredCandidate{internalId, snapshot.docs.getDocId(internalId), normalizedScore});
+        const double normalizedScore = maxRawScore > 0.0 ? (scoreBuffer[internalId] / maxRawScore) : 1.0;
+        candidates.push_back(ScoredCandidate{internalId, normalizedScore});
     }
 
     const size_t resultCount = std::min(limit, candidates.size());
     std::partial_sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(resultCount),
                       candidates.end(),
-                      [](const ScoredCandidate &a, const ScoredCandidate &b)
+                      [&snapshot](const ScoredCandidate &a, const ScoredCandidate &b)
                       {
                           if (a.score != b.score) return a.score > b.score;
-                          return a.docId < b.docId;
+                          return snapshot.docs.getDocId(a.internalId) < snapshot.docs.getDocId(b.internalId);
                       });
 
     std::vector<SearchResult> results;
@@ -237,8 +277,9 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot &snapshot, co
     for (size_t i = 0; i < resultCount; i++)
     {
         const ScoredCandidate &candidate = candidates[i];
+        const std::string docId = snapshot.docs.getDocId(candidate.internalId);
         const std::string text = snapshot.docs.readText(candidate.internalId);
-        results.push_back(SearchResult{candidate.docId, candidate.score, buildSnippet(text, terms)});
+        results.push_back(SearchResult{docId, candidate.score, buildSnippet(text, terms)});
     }
 
     return results;

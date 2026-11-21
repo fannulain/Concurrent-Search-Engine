@@ -18,8 +18,15 @@ namespace
 {
 
 constexpr size_t CHUNK_WORD_LIMIT = 1000;
+constexpr size_t BATCH_CHUNK_LIMIT = 16;
 constexpr size_t MAX_HEADER_SCAN_BYTES = 32768;
 constexpr size_t MAX_FOOTER_SCAN_BYTES = 65536;
+
+struct FileEntry
+{
+    std::filesystem::path path;
+    uintmax_t size = 0;
+};
 
 std::pair<size_t, size_t> computeContentBounds(std::string_view content)
 {
@@ -115,6 +122,22 @@ void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer
 
     std::unordered_map<std::string, uint32_t> termFreq;
     termFreq.reserve(512);
+
+    std::vector<DocumentMeta> metaBatch;
+    metaBatch.reserve(BATCH_CHUNK_LIMIT);
+    std::vector<BatchPosting> postingBatch;
+    postingBatch.reserve(BATCH_CHUNK_LIMIT * 256);
+
+    auto flushBatch = [&]()
+    {
+        if (metaBatch.empty()) return;
+        const uint32_t docCount = static_cast<uint32_t>(metaBatch.size());
+        const uint32_t baseId = snapshot.docs.addBatch(metaBatch);
+        snapshot.index.addPostingBatch(baseId, docCount, postingBatch);
+        metaBatch.clear();
+        postingBatch.clear();
+    };
+
     size_t pos = startOffset;
     size_t chunkNo = 0;
 
@@ -160,17 +183,28 @@ void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer
             continue;
         }
 
+        const uint32_t localOffset = static_cast<uint32_t>(metaBatch.size());
         DocumentMeta meta;
         meta.docId = bookId + "_" + std::to_string(chunkNo);
         meta.filePath = filePathStr;
         meta.byteOffset = static_cast<uint64_t>(chunkStart);
         meta.byteLength = static_cast<uint32_t>(chunkLen);
         meta.tokenCount = tokenCount;
+        metaBatch.push_back(std::move(meta));
 
-        const uint32_t internalId = snapshot.docs.add(std::move(meta));
-        snapshot.index.addDocument(internalId, termFreq);
+        for (const auto &[term, tf] : termFreq)
+        {
+            postingBatch.push_back(BatchPosting{localOffset, term, tf});
+        }
+
+        if (metaBatch.size() >= BATCH_CHUNK_LIMIT)
+        {
+            flushBatch();
+        }
         chunkNo++;
     }
+
+    flushBatch();
 }
 
 } // namespace
@@ -195,7 +229,7 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         throw std::runtime_error("Dataset directory does not exist: " + datasetPath);
     }
 
-    std::vector<std::filesystem::path> files;
+    std::vector<FileEntry> files;
     std::error_code scanEc;
     std::filesystem::recursive_directory_iterator it(
         datasetPath, std::filesystem::directory_options::skip_permission_denied, scanEc);
@@ -211,7 +245,9 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         const std::string ext = it->path().extension().string();
         if (ext == ".txt" || ext == ".TXT")
         {
-            files.push_back(it->path());
+            std::error_code sizeEc;
+            const uintmax_t fileSize = it->file_size(sizeEc);
+            files.push_back(FileEntry{it->path(), sizeEc ? 0 : fileSize});
         }
     }
 
@@ -220,7 +256,13 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         throw std::runtime_error("No .txt files found in dataset directory: " + datasetPath);
     }
 
-    std::sort(files.begin(), files.end());
+    // Longest-Processing-Time-First order minimizes tail latency across large worker counts
+    std::sort(files.begin(), files.end(),
+              [](const FileEntry &a, const FileEntry &b)
+              {
+                  if (a.size != b.size) return a.size > b.size;
+                  return a.path < b.path;
+              });
 
     auto snapshot = std::make_shared<IndexSnapshot>(indexBuckets);
     std::mutex logMtx;
@@ -230,9 +272,10 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         std::vector<std::future<void>> futures;
         futures.reserve(files.size());
 
-        for (const auto &filePath : files)
+        for (const auto &entry : files)
         {
-            futures.push_back(pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(),
+            futures.push_back(pool.addTask([filePath = entry.path, &tokenizer = this->tokenizer,
+                                            snapshotPtr = snapshot.get(),
                                             &logMtx]() { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
         }
 
@@ -244,6 +287,7 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
     }
 
     snapshot->index.shrinkToFit();
+    snapshot->docs.seal();
 
     const auto endTime = std::chrono::steady_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();

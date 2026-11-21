@@ -21,7 +21,7 @@ using nlohmann::json;
 
 constexpr std::chrono::milliseconds OLLAMA_HEALTH_TIMEOUT{2000};
 constexpr int MIN_INDEX_THREADS = 1;
-constexpr int MAX_INDEX_THREADS = 64;
+constexpr int MAX_INDEX_THREADS = 128;
 constexpr int DEFAULT_SEARCH_LIMIT = 10;
 constexpr int MIN_SEARCH_LIMIT = 1;
 constexpr int MAX_SEARCH_LIMIT = 100;
@@ -181,7 +181,7 @@ HttpResponse RequestHandler::handleIndex(const HttpRequest &request)
     int threads = 0;
     if (!parseBoundedInt(body["threads"], MIN_INDEX_THREADS, MAX_INDEX_THREADS, threads))
     {
-        return makeError(request, http::status::bad_request, "Field 'threads' must be an integer in [1, 64]");
+        return makeError(request, http::status::bad_request, "Field 'threads' must be an integer in [1, 128]");
     }
 
     bool expected = false;

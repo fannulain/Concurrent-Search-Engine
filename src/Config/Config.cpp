@@ -55,7 +55,7 @@ Config Config::fromEnv()
     config.port = static_cast<uint16_t>(portValue);
 
     const unsigned int hw = std::thread::hardware_concurrency();
-    const int threads = std::stoi(getEnv("SERVER_THREADS", std::to_string(hw == 0 ? 4 : hw)));
+    const int threads = std::stoi(getEnv("SERVER_THREADS", std::to_string(hw < 2 ? 4 : hw)));
     if (threads <= 0)
     {
         throw std::invalid_argument("SERVER_THREADS must be positive");

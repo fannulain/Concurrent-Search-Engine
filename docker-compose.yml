@@ -14,6 +14,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
       OLLAMA_TIMEOUT_MS: "30000"
       INDEX_BUCKETS: "64"
+      MALLOC_ARENA_MAX: "16"
     volumes:
       - ./data:/data:ro
     depends_on:

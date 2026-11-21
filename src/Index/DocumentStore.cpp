@@ -7,13 +7,63 @@
 uint32_t DocumentStore::add(DocumentMeta meta)
 {
     std::unique_lock<std::shared_mutex> lock(mtx);
+    if (sealed.load(std::memory_order_acquire))
+    {
+        throw std::logic_error("DocumentStore is sealed");
+    }
     const uint32_t internalId = static_cast<uint32_t>(docs.size());
+    totalTokens += meta.tokenCount;
     docs.push_back(std::move(meta));
     return internalId;
 }
 
+uint32_t DocumentStore::addBatch(std::vector<DocumentMeta> &batch)
+{
+    if (batch.empty())
+    {
+        return size();
+    }
+
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    if (sealed.load(std::memory_order_acquire))
+    {
+        throw std::logic_error("DocumentStore is sealed");
+    }
+
+    const uint32_t baseId = static_cast<uint32_t>(docs.size());
+    docs.reserve(docs.size() + batch.size());
+    for (DocumentMeta &meta : batch)
+    {
+        const uint32_t tok = meta.tokenCount;
+        docs.push_back(std::move(meta));
+        totalTokens += tok;
+    }
+    return baseId;
+}
+
+void DocumentStore::seal()
+{
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    docs.shrink_to_fit();
+    sealed.store(true, std::memory_order_release);
+}
+
+bool DocumentStore::isSealed() const
+{
+    return sealed.load(std::memory_order_acquire);
+}
+
 DocumentMeta DocumentStore::get(uint32_t internalId) const
 {
+    if (sealed.load(std::memory_order_acquire))
+    {
+        if (internalId >= docs.size())
+        {
+            throw std::out_of_range("Document ID out of range");
+        }
+        return docs[internalId];
+    }
+
     std::shared_lock<std::shared_mutex> lock(mtx);
     if (internalId >= docs.size())
     {
@@ -24,6 +74,15 @@ DocumentMeta DocumentStore::get(uint32_t internalId) const
 
 uint32_t DocumentStore::getTokenCount(uint32_t internalId) const
 {
+    if (sealed.load(std::memory_order_acquire))
+    {
+        if (internalId >= docs.size())
+        {
+            throw std::out_of_range("Document ID out of range");
+        }
+        return docs[internalId].tokenCount;
+    }
+
     std::shared_lock<std::shared_mutex> lock(mtx);
     if (internalId >= docs.size())
     {
@@ -34,6 +93,15 @@ uint32_t DocumentStore::getTokenCount(uint32_t internalId) const
 
 std::string DocumentStore::getDocId(uint32_t internalId) const
 {
+    if (sealed.load(std::memory_order_acquire))
+    {
+        if (internalId >= docs.size())
+        {
+            throw std::out_of_range("Document ID out of range");
+        }
+        return docs[internalId].docId;
+    }
+
     std::shared_lock<std::shared_mutex> lock(mtx);
     if (internalId >= docs.size())
     {
@@ -44,8 +112,24 @@ std::string DocumentStore::getDocId(uint32_t internalId) const
 
 uint32_t DocumentStore::size() const
 {
+    if (sealed.load(std::memory_order_acquire))
+    {
+        return static_cast<uint32_t>(docs.size());
+    }
+
     std::shared_lock<std::shared_mutex> lock(mtx);
     return static_cast<uint32_t>(docs.size());
+}
+
+double DocumentStore::getAverageTokenCount() const
+{
+    if (sealed.load(std::memory_order_acquire))
+    {
+        return docs.empty() ? 0.0 : static_cast<double>(totalTokens) / static_cast<double>(docs.size());
+    }
+
+    std::shared_lock<std::shared_mutex> lock(mtx);
+    return docs.empty() ? 0.0 : static_cast<double>(totalTokens) / static_cast<double>(docs.size());
 }
 
 std::string DocumentStore::readText(uint32_t internalId) const

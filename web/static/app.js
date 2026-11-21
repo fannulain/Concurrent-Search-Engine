@@ -358,8 +358,8 @@
   els.indexForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const threads = Number.parseInt(els.threadsInput.value, 10);
-    if (!Number.isInteger(threads) || threads < 1 || threads > 64) {
-      showFeedback(els.indexMessage, "Threads must be an integer between 1 and 64.", "error");
+    if (!Number.isInteger(threads) || threads < 1 || threads > 128) {
+      showFeedback(els.indexMessage, "Threads must be an integer between 1 and 128.", "error");
       return;
     }
 
