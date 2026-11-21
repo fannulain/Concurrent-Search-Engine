@@ -1,0 +1,11 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "system": "Windows",
+  "release": "11",
+  "machine": "AMD64",
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "logical_cores": 16,
+  "python_version": "3.14.0",
+  "cpu_name": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "total_ram_gb": 15.63
+}

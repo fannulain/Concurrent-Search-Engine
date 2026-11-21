@@ -1,0 +1,116 @@
+{
+  "load": {
+    "aggregated": {
+      "method": "",
+      "name": "Aggregated",
+      "requests": 27199,
+      "failures": 0,
+      "median_ms": 210.0,
+      "avg_ms": 214.25,
+      "p95_ms": 450.0,
+      "p99_ms": 540.0,
+      "max_ms": 6893.63,
+      "rps": 227.44,
+      "failure_rate_pct": 0.0,
+      "peak_users": 150,
+      "peak_rps": 279.4,
+      "duration_s": 116.0,
+      "locust_exit_code": 0
+    },
+    "endpoints": [
+      {
+        "method": "GET",
+        "name": "GET /api/health",
+        "requests": 2342,
+        "failures": 0,
+        "median_ms": 160.0,
+        "avg_ms": 156.95,
+        "p95_ms": 390.0,
+        "p99_ms": 470.0,
+        "max_ms": 3569.59,
+        "rps": 19.58
+      },
+      {
+        "method": "GET",
+        "name": "GET /api/stats",
+        "requests": 2284,
+        "failures": 0,
+        "median_ms": 150.0,
+        "avg_ms": 154.35,
+        "p95_ms": 390.0,
+        "p99_ms": 460.0,
+        "max_ms": 6392.93,
+        "rps": 19.1
+      },
+      {
+        "method": "POST",
+        "name": "POST /api/search [keyword]",
+        "requests": 22573,
+        "failures": 0,
+        "median_ms": 230.0,
+        "avg_ms": 226.25,
+        "p95_ms": 460.0,
+        "p99_ms": 550.0,
+        "max_ms": 6893.63,
+        "rps": 188.75
+      }
+    ]
+  },
+  "spike": {
+    "aggregated": {
+      "method": "",
+      "name": "Aggregated",
+      "requests": 17087,
+      "failures": 41,
+      "median_ms": 360.0,
+      "avg_ms": 491.23,
+      "p95_ms": 610.0,
+      "p99_ms": 7800.0,
+      "max_ms": 27405.25,
+      "rps": 155.67,
+      "failure_rate_pct": 0.24,
+      "peak_users": 250,
+      "peak_rps": 277.3,
+      "duration_s": 105.0,
+      "locust_exit_code": 1
+    },
+    "endpoints": [
+      {
+        "method": "GET",
+        "name": "GET /api/health",
+        "requests": 1455,
+        "failures": 23,
+        "median_ms": 300.0,
+        "avg_ms": 456.24,
+        "p95_ms": 540.0,
+        "p99_ms": 10000.0,
+        "max_ms": 10329.03,
+        "rps": 13.26
+      },
+      {
+        "method": "GET",
+        "name": "GET /api/stats",
+        "requests": 1384,
+        "failures": 18,
+        "median_ms": 300.0,
+        "avg_ms": 413.8,
+        "p95_ms": 540.0,
+        "p99_ms": 10000.0,
+        "max_ms": 10324.46,
+        "rps": 12.61
+      },
+      {
+        "method": "POST",
+        "name": "POST /api/search [keyword]",
+        "requests": 14248,
+        "failures": 0,
+        "median_ms": 370.0,
+        "avg_ms": 502.33,
+        "p95_ms": 610.0,
+        "p99_ms": 6200.0,
+        "max_ms": 27405.25,
+        "rps": 129.81
+      }
+    ]
+  }
+}
