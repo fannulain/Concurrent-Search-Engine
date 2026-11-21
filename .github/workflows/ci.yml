@@ -41,5 +41,5 @@ jobs:
 
       - name: Check Python scripts and run CLI unit tests
         run: |
-          python3 -m py_compile search scripts/download_dataset.py bench/bench_index.py bench/bench_search.py tests/test_cli.py
+          python3 -m py_compile search scripts/download_dataset.py bench/bench_index.py bench/bench_search.py bench/locustfile.py bench/run_locust_suite.py tests/test_cli.py
           python3 -m unittest discover -s tests -p "test_*.py" -v
