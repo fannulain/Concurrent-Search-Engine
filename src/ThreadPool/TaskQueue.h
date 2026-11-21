@@ -16,6 +16,7 @@ private:
 
     bool stopFlag = false;
     bool pauseFlag = false;
+    int pushedCount = 0;
 
 public:
     TaskQueue() = default;
@@ -26,6 +27,8 @@ public:
 
     bool empty() const;
     int size() const;
+    int getPushedCount() const;
+    bool isPaused() const;
 
     template <typename TaskArg> bool push(TaskArg &&task);
 
@@ -51,12 +54,25 @@ template <typename TaskType> int TaskQueue<TaskType>::size() const
     return static_cast<int>(innerQueue.size());
 }
 
+template <typename TaskType> int TaskQueue<TaskType>::getPushedCount() const
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    return pushedCount;
+}
+
+template <typename TaskType> bool TaskQueue<TaskType>::isPaused() const
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    return pauseFlag;
+}
+
 template <typename TaskType> template <typename TaskArg> bool TaskQueue<TaskType>::push(TaskArg &&task)
 {
     {
         std::lock_guard<std::mutex> lock(mtx);
         if (stopFlag) return false;
         innerQueue.push(std::forward<TaskArg>(task));
+        pushedCount++;
     }
     condVar.notify_one();
     return true;
@@ -68,6 +84,7 @@ template <typename TaskType> template <typename... Args> bool TaskQueue<TaskType
         std::lock_guard<std::mutex> lock(mtx);
         if (stopFlag) return false;
         innerQueue.emplace(std::forward<Args>(args)...);
+        pushedCount++;
     }
     condVar.notify_one();
     return true;
@@ -124,6 +141,7 @@ template <typename TaskType> std::vector<TaskType> TaskQueue<TaskType>::stop(boo
 template <typename TaskType> void TaskQueue<TaskType>::pause()
 {
     std::lock_guard<std::mutex> lock(mtx);
+    if (stopFlag) return;
     pauseFlag = true;
 }
 
@@ -131,6 +149,7 @@ template <typename TaskType> void TaskQueue<TaskType>::resume()
 {
     {
         std::lock_guard<std::mutex> lock(mtx);
+        if (stopFlag) return;
         pauseFlag = false;
     }
     condVar.notify_all();

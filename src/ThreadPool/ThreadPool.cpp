@@ -11,15 +11,23 @@ ThreadPool::ThreadPool(int threadCount)
     queue = std::make_unique<TaskQueue<std::function<void()>>>();
     workers.reserve(static_cast<size_t>(threadCount));
 
-    for (int i = 0; i < threadCount; i++)
+    try
     {
-        workers.emplace_back(&ThreadPool::workerLoop, this);
+        for (int i = 0; i < threadCount; i++)
+        {
+            workers.emplace_back(&ThreadPool::workerLoop, this);
+        }
+    }
+    catch (...)
+    {
+        stop(false);
+        throw;
     }
 }
 
 ThreadPool::~ThreadPool()
 {
-    if (!stopFlag.load()) stop(true);
+    stop(true);
 }
 
 void ThreadPool::workerLoop()
@@ -41,9 +49,10 @@ void ThreadPool::workerLoop()
 
 void ThreadPool::stop(bool finishTasks)
 {
-    if (stopFlag.exchange(true)) return;
+    std::lock_guard<std::mutex> lock(stopMtx);
+    if (stopFlag.exchange(true, std::memory_order_acq_rel)) return;
 
-    queue->stop(!finishTasks);
+    if (queue) queue->stop(!finishTasks);
 
     for (std::thread &worker : workers)
     {
@@ -53,24 +62,24 @@ void ThreadPool::stop(bool finishTasks)
 
 void ThreadPool::pause()
 {
-    if (stopFlag.load() || pauseFlag.exchange(true)) return;
+    if (stopFlag.load(std::memory_order_acquire) || !queue) return;
     queue->pause();
 }
 
 void ThreadPool::resume()
 {
-    if (stopFlag.load() || !pauseFlag.exchange(false)) return;
+    if (stopFlag.load(std::memory_order_acquire) || !queue) return;
     queue->resume();
 }
 
 bool ThreadPool::isWorking() const
 {
-    return !stopFlag.load();
+    return !stopFlag.load(std::memory_order_acquire);
 }
 
 bool ThreadPool::isPaused() const
 {
-    return pauseFlag.load();
+    return queue ? queue->isPaused() : false;
 }
 
 int ThreadPool::getQueueSize() const
@@ -80,7 +89,7 @@ int ThreadPool::getQueueSize() const
 
 int ThreadPool::getTasksSubmitted() const
 {
-    return tasksSubmitted.load();
+    return queue ? queue->getPushedCount() : 0;
 }
 
 int ThreadPool::getTasksCompleted() const

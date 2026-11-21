@@ -7,6 +7,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -21,9 +22,8 @@ private:
     std::vector<std::thread> workers;
 
     std::atomic<bool> stopFlag{false};
-    std::atomic<bool> pauseFlag{false};
+    mutable std::mutex stopMtx;
 
-    std::atomic<int> tasksSubmitted{0};
     std::atomic<int> tasksCompleted{0};
 
     void workerLoop();
@@ -74,7 +74,6 @@ auto ThreadPool::addTask(Func &&func, Args &&...args) -> std::future<std::invoke
         throw std::runtime_error("Cannot add task to a stopped thread pool");
     }
 
-    tasksSubmitted.fetch_add(1);
     return resultFuture;
 }
 
