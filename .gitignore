@@ -13,9 +13,6 @@ compile_commands.json
 data/*
 !data/.gitkeep
 
-# Benchmark artifacts
-bench/results/
-
 # Python
 __pycache__/
 *.pyc

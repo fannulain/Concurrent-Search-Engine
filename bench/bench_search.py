@@ -7,6 +7,7 @@ import csv
 import math
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import threading
@@ -34,12 +35,76 @@ BENCH_QUERIES = [
 QUALITY_CASES = [
     ("divine comedy inferno", "Dante's Divine Comedy / Inferno chunks", ["inferno", "dante", "hell", "comedy"]),
     ("sherlock holmes detective", "Arthur Conan Doyle Sherlock Holmes stories", ["holmes", "sherlock", "detective"]),
-    ("french revolution guillotine", "Historical or literary texts on the French Revolution", ["revolution", "french", "france"]),
-    ("genesis creation light earth", "King James Bible / Genesis passages", ["genesis", "earth", "light", "god"]),
+    (
+        "french revolution guillotine",
+        "Historical or literary texts on the French Revolution",
+        ["revolution", "french", "france"],
+    ),
+    ("moses pharaoh egypt exodus", "King James Bible (Exodus / Moses)", ["bible", "moses", "pharaoh", "egypt", "exodus"]),
     ("alice wonderland white rabbit", "Lewis Carroll's Alice in Wonderland", ["alice", "rabbit", "wonderland"]),
     ("xqzvnonexistentkplm", "Empty result set (no matches)", []),
     ("the and of in", "Empty result set (stop words only)", []),
 ]
+
+
+def build_book_file_index(data_dir: Path) -> dict[str, Path]:
+    book_map: dict[str, Path] = {}
+    if not data_dir.exists():
+        return book_map
+    for path in sorted(data_dir.rglob("*.txt")):
+        if path.is_file() and path.stem not in book_map:
+            book_map[path.stem] = path
+    return book_map
+
+
+def load_book_title(doc_id: str, book_map: dict[str, Path], cache: dict[str, str]) -> str:
+    book_id = doc_id.split("_", 1)[0]
+    if book_id in cache:
+        return cache[book_id]
+
+    title = f"Book #{book_id}"
+    book_path = book_map.get(book_id)
+    if book_path is not None:
+        try:
+            lines: list[str] = []
+            with book_path.open("r", encoding="utf-8", errors="replace") as f:
+                for _ in range(60):
+                    line = f.readline()
+                    if not line:
+                        break
+                    lines.append(line.strip())
+
+            extracted = ""
+            for line in lines:
+                if line.lower().startswith("title:"):
+                    extracted = line.split(":", 1)[1].strip()
+                    break
+
+            if not extracted:
+                for line in lines[:12]:
+                    if not line:
+                        continue
+                    match = re.search(
+                        r"(?:Project Gutenberg(?:'s| V\d+)?\s+(?:EBook|eBook|Etext|etext)\s+of\s+|"
+                        r"Project Gutenberg(?:'s| V\d+)?\s+)(.+)",
+                        line,
+                        flags=re.IGNORECASE,
+                    )
+                    if match:
+                        candidate = match.group(1).strip().strip("*").strip()
+                        candidate = re.sub(r",\s+by\s+.*$", "", candidate, flags=re.IGNORECASE).strip()
+                        if candidate:
+                            extracted = candidate
+                            break
+
+            if extracted:
+                extracted = extracted.replace("|", "/")
+                title = extracted[:57] + "..." if len(extracted) > 60 else extracted
+        except OSError:
+            pass
+
+    cache[book_id] = title
+    return title
 
 
 def percentile(sorted_values: list[float], pct: float) -> float:
@@ -56,8 +121,10 @@ def percentile(sorted_values: list[float], pct: float) -> float:
     return sorted_values[low] * (1.0 - weight) + sorted_values[high] * weight
 
 
-def run_quality_evaluation(base_url: str, out_dir: Path) -> None:
+def run_quality_evaluation(base_url: str, out_dir: Path, data_dir: Path) -> None:
     session = requests.Session()
+    book_map = build_book_file_index(data_dir)
+    title_cache: dict[str, str] = {}
     lines = [
         "| Test Query | Expected Result | Actual Top Result | Score | Top-3 Doc IDs | Server Time (ms) | Status |",
         "|---|---|---|---|---|---|---|",
@@ -72,26 +139,31 @@ def run_quality_evaluation(base_url: str, out_dir: Path) -> None:
 
         if not expected_keywords:
             passed = len(results) == 0
-            top_doc = "(empty)" if not results else results[0]["doc_id"]
+            top_cell = "(empty)" if not results else f"`{results[0]['doc_id']}`"
             top_score = "—" if not results else f"{results[0]['score']:.3f}"
             top3 = "—" if not results else ", ".join(r["doc_id"] for r in results[:3])
         else:
-            passed = len(results) > 0
             if results:
-                combined_snippets = " ".join(r.get("snippet", "").lower() for r in results[:3])
-                if not any(kw in combined_snippets for kw in expected_keywords):
-                    passed = len(results) > 0
+                top_titles = [load_book_title(r["doc_id"], book_map, title_cache) for r in results[:3]]
+                combined_parts = [t.lower() for t in top_titles] + [
+                    r.get("snippet", "").lower() for r in results[:3]
+                ]
+                combined_text = " ".join(combined_parts)
+                passed = any(kw.lower() in combined_text for kw in expected_keywords)
                 top_doc = results[0]["doc_id"]
+                top_title = top_titles[0]
+                top_cell = f"`{top_doc}` — {top_title}"
                 top_score = f"{results[0]['score']:.3f}"
                 top3 = ", ".join(r["doc_id"] for r in results[:3])
             else:
-                top_doc = "(none)"
+                passed = False
+                top_cell = "(none)"
                 top_score = "0.000"
                 top3 = "(none)"
 
         status_label = "PASS" if passed else "FAIL"
         lines.append(
-            f"| `{query}` | {expected_desc} | `{top_doc}` | {top_score} | `{top3}` | {time_ms} | {status_label} |"
+            f"| `{query}` | {expected_desc} | {top_cell} | {top_score} | `{top3}` | {time_ms} | {status_label} |"
         )
 
     (out_dir / "search_quality_table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -137,6 +209,7 @@ def main() -> int:
     )
     parser.add_argument("--duration", type=float, default=30.0, help="Duration in seconds per level (default: 30)")
     parser.add_argument("--index-threads", type=int, default=8, help="Threads for auto-indexing if index is empty")
+    parser.add_argument("--data-dir", default="data", help="Dataset root directory for book title lookup")
     parser.add_argument("--output-dir", default="bench/results", help="Results directory")
     args = parser.parse_args()
 
@@ -155,7 +228,7 @@ def main() -> int:
         print(f"Failed to verify or initialize index at {base_url}: {exc}", file=sys.stderr)
         return 1
 
-    run_quality_evaluation(base_url, out_dir)
+    run_quality_evaluation(base_url, out_dir, Path(args.data_dir))
     print(f"Saved search quality table to {out_dir / 'search_quality_table.md'}")
 
     results = []

@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -35,17 +36,48 @@ def collect_hardware_info() -> dict:
 
     if platform.system() == "Windows":
         try:
-            ps_cmd = (
-                "Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name; "
-                "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)"
-            )
-            out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_cmd], text=True, timeout=5)
-            lines = [line.strip() for line in out.splitlines() if line.strip()]
-            if len(lines) >= 2:
-                info["cpu_name"] = lines[0]
-                info["total_ram_gb"] = float(lines[1])
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            ) as key:
+                info["cpu_name"] = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
         except Exception:
             pass
+
+        try:
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            mem_status = MEMORYSTATUSEX(dwLength=ctypes.sizeof(MEMORYSTATUSEX))
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem_status)):
+                info["total_ram_gb"] = round(mem_status.ullTotalPhys / (1024**3), 2)
+        except Exception:
+            pass
+
+        if "cpu_name" not in info or "total_ram_gb" not in info:
+            try:
+                ps_cmd = (
+                    "Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name; "
+                    "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)"
+                )
+                out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_cmd], text=True, timeout=5)
+                lines = [line.strip() for line in out.splitlines() if line.strip()]
+                if len(lines) >= 2:
+                    info.setdefault("cpu_name", lines[0])
+                    info.setdefault("total_ram_gb", float(lines[1]))
+            except Exception:
+                pass
     elif platform.system() == "Linux":
         try:
             meminfo = Path("/proc/meminfo").read_text(encoding="utf-8")
@@ -63,7 +95,13 @@ def collect_hardware_info() -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Index build scalability benchmark")
     parser.add_argument("--host", default="http://localhost:8080", help="Server base URL")
-    parser.add_argument("--threads", nargs="+", type=int, default=[1, 2, 4, 8, 16], help="Thread counts to benchmark")
+    parser.add_argument(
+        "--threads",
+        nargs="+",
+        type=int,
+        default=[1, 2, 4, 8, 16, 32, 64, 128],
+        help="Thread counts to benchmark",
+    )
     parser.add_argument("--runs", type=int, default=5, help="Number of runs per thread count (default: 5)")
     parser.add_argument("--output-dir", default="bench/results", help="Results directory")
     args = parser.parse_args()
@@ -162,24 +200,29 @@ def main() -> int:
     speedups = [s["speedup"] for s in summaries]
     efficiencies = [s["efficiency"] * 100.0 for s in summaries]
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(8.5, 5))
     ax.errorbar(thread_vals, median_sec, yerr=[err_low, err_high], marker="o", linewidth=2, capsize=4)
-    ax.set_title("Inverted Index Build Time vs Thread Count (Median of 5 Runs)")
+    ax.set_title(f"Inverted Index Build Time vs Thread Count (Median of {args.runs} Runs)")
     ax.set_xlabel("Thread Count (N)")
     ax.set_ylabel("Build Time (seconds)")
+    ax.set_xscale("log", base=2)
     ax.set_xticks(thread_vals)
+    ax.set_xticklabels([str(t) for t in thread_vals])
     ax.grid(True, linestyle="--", alpha=0.5)
     fig.tight_layout()
     fig.savefig(out_dir / "index_build_time.png", dpi=150)
     plt.close(fig)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.6))
     ax1.plot(thread_vals, speedups, marker="o", linewidth=2, label="Measured S(N)")
     ax1.plot(thread_vals, thread_vals, linestyle="--", color="gray", label="Ideal Linear S(N) = N")
     ax1.set_title("Speedup S(N) = T(1) / T(N)")
     ax1.set_xlabel("Thread Count (N)")
     ax1.set_ylabel("Speedup")
+    ax1.set_xscale("log", base=2)
     ax1.set_xticks(thread_vals)
+    ax1.set_xticklabels([str(t) for t in thread_vals])
+    ax1.set_ylim(0, max(max(speedups) * 1.35 + 1.0, 2.0))
     ax1.legend()
     ax1.grid(True, linestyle="--", alpha=0.5)
 
@@ -187,7 +230,9 @@ def main() -> int:
     ax2.set_title("Parallel Efficiency E(N) = S(N) / N")
     ax2.set_xlabel("Thread Count (N)")
     ax2.set_ylabel("Efficiency (%)")
+    ax2.set_xscale("log", base=2)
     ax2.set_xticks(thread_vals)
+    ax2.set_xticklabels([str(t) for t in thread_vals])
     ax2.set_ylim(0, 115)
     ax2.grid(True, linestyle="--", alpha=0.5)
 
