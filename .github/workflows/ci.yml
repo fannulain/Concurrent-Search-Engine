@@ -39,6 +39,7 @@ jobs:
           cmake --build build-tsan --parallel
           setarch x86_64 -R ctest --test-dir build-tsan --output-on-failure
 
-      - name: Check Python scripts syntax
+      - name: Check Python scripts and run CLI unit tests
         run: |
-          python3 -m py_compile search scripts/download_dataset.py bench/bench_index.py bench/bench_search.py
+          python3 -m py_compile search scripts/download_dataset.py bench/bench_index.py bench/bench_search.py tests/test_cli.py
+          python3 -m unittest discover -s tests -p "test_*.py" -v

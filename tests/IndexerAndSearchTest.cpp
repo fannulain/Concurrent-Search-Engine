@@ -166,3 +166,38 @@ TEST(IndexerAndSearchTest, ThrowsOnMissingOrEmptyDataset)
     const IndexerService emptyIndexer(tokenizer, emptyDir.path().string(), 8);
     EXPECT_THROW(emptyIndexer.buildIndex(1), std::runtime_error);
 }
+
+TEST(IndexerAndSearchTest, Bm25PreventsShortTailChunkFromOutrankingFullMultiTermMatch)
+{
+    TempDirGuard tempDir;
+
+    std::string danteChunk;
+    for (int i = 0; i < 60; i++)
+    {
+        danteChunk += "canticle pilgrim journey shadow light verse ";
+    }
+    danteChunk += "divine comedy inferno divine comedy inferno divine comedy inferno ";
+    for (int i = 0; i < 40; i++)
+    {
+        danteChunk += "canticle pilgrim journey shadow light verse ";
+    }
+
+    const std::string tinyTailChunk = "short epilogue poem mentioning dante and inferno once at the end of anthology";
+
+    writeTextFile(tempDir.path() / "1001.txt", danteChunk);
+    writeTextFile(tempDir.path() / "2620.txt", tinyTailChunk);
+    writeTextFile(tempDir.path() / "3000.txt", "astronomy planet comet telescope orbit nebula");
+
+    const Tokenizer tokenizer;
+    const IndexerService indexer(tokenizer, tempDir.path().string(), 16);
+    const auto snap = indexer.buildIndex(2);
+
+    const SearchEngine engine(tokenizer);
+    const auto results = engine.searchQuery(*snap, "divine comedy inferno", 10);
+
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results[0].docId, "1001_0");
+    EXPECT_DOUBLE_EQ(results[0].score, 1.0);
+    EXPECT_EQ(results[1].docId, "2620_0");
+    EXPECT_LT(results[1].score, 1.0);
+}

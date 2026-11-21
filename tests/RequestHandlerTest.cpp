@@ -109,7 +109,7 @@ TEST(RequestHandlerTest, ValidatesContractsAndServesSearchAfterIndexing)
               http::status::bad_request);
     EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/index", R"({"threads":0})")).result(),
               http::status::bad_request);
-    EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/index", R"({"threads":65})")).result(),
+    EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/index", R"({"threads":129})")).result(),
               http::status::bad_request);
     EXPECT_EQ(handler.handle(makeRequest(http::verb::post, "/api/index", R"({"threads":true})")).result(),
               http::status::bad_request);
