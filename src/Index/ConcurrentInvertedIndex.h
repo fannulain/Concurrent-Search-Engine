@@ -48,8 +48,7 @@ public:
     void addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq);
     void addPostingBatch(uint32_t baseDocId, uint32_t docCount, const std::vector<BatchPosting> &entries);
     std::vector<Posting> getPostings(const std::string &term) const;
-    void visitPostings(const std::string &term,
-                       const std::function<void(const std::vector<Posting> &)> &visitor) const;
+    void visitPostings(const std::string &term, const std::function<void(const std::vector<Posting> &)> &visitor) const;
     void shrinkToFit();
 
     uint32_t getDocumentCount() const;

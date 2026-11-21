@@ -256,7 +256,7 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         throw std::runtime_error("No .txt files found in dataset directory: " + datasetPath);
     }
 
-    // Longest-Processing-Time-First order minimizes tail latency across large worker counts
+    // sort descending by size (LPT) to minimize tail latency on large worker counts
     std::sort(files.begin(), files.end(),
               [](const FileEntry &a, const FileEntry &b)
               {
@@ -274,8 +274,8 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
 
         for (const auto &entry : files)
         {
-            futures.push_back(pool.addTask([filePath = entry.path, &tokenizer = this->tokenizer,
-                                            snapshotPtr = snapshot.get(),
+            const auto &filePath = entry.path;
+            futures.push_back(pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(),
                                             &logMtx]() { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
         }
 

@@ -86,8 +86,8 @@ void SearchServer::start()
             stop();
         });
 
-    std::cout << "Search server listening on 0.0.0.0:" << actualPort << " with " << serverThreads
-              << " network threads" << std::endl;
+    std::cout << "Search server listening on 0.0.0.0:" << actualPort << " with " << serverThreads << " network threads"
+              << std::endl;
 
     networkPool = std::make_unique<ThreadPool>(serverThreads);
     for (int i = 0; i < serverThreads; i++)
