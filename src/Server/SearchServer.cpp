@@ -53,6 +53,7 @@ public:
     }
 
     void start() { doAccept(); }
+    uint16_t localPort() const { return acceptor.local_endpoint().port(); }
 };
 
 } // namespace
@@ -66,13 +67,17 @@ SearchServer::SearchServer(uint16_t port, int serverThreads, RequestHandler &req
 SearchServer::~SearchServer()
 {
     stop();
+    requestHandler.getOllamaService().stop(false);
 }
 
 void SearchServer::start()
 {
     if (isRunning.exchange(true)) return;
 
-    std::make_shared<Listener>(ioc, tcp::endpoint{net::ip::address_v4::any(), port}, requestHandler)->start();
+    auto listener = std::make_shared<Listener>(ioc, tcp::endpoint{net::ip::address_v4::any(), port}, requestHandler);
+    const uint16_t actualPort = listener->localPort();
+    boundPort.store(actualPort, std::memory_order_release);
+    listener->start();
 
     signals.async_wait(
         [this](const boost::system::error_code &, int signal)
@@ -81,8 +86,8 @@ void SearchServer::start()
             stop();
         });
 
-    std::cout << "Search server listening on 0.0.0.0:" << port << " with " << serverThreads << " network threads"
-              << std::endl;
+    std::cout << "Search server listening on 0.0.0.0:" << actualPort << " with " << serverThreads
+              << " network threads" << std::endl;
 
     networkPool = std::make_unique<ThreadPool>(serverThreads);
     for (int i = 0; i < serverThreads; i++)
@@ -90,7 +95,20 @@ void SearchServer::start()
         networkPool->addTask([this]() { ioc.run(); });
     }
 
+    {
+        std::lock_guard<std::mutex> lock(readyMtx);
+        ready = true;
+    }
+    readyCv.notify_all();
+
     networkPool->stop(true);
+    requestHandler.getOllamaService().stop(false);
+
+    {
+        std::lock_guard<std::mutex> lock(readyMtx);
+        ready = false;
+    }
+    readyCv.notify_all();
     std::cout << "Server stopped" << std::endl;
 }
 
@@ -98,4 +116,15 @@ void SearchServer::stop()
 {
     if (!isRunning.exchange(false)) return;
     ioc.stop();
+}
+
+bool SearchServer::waitUntilReady(std::chrono::milliseconds timeout)
+{
+    std::unique_lock<std::mutex> lock(readyMtx);
+    return readyCv.wait_for(lock, timeout, [this]() { return ready; });
+}
+
+uint16_t SearchServer::getBoundPort() const
+{
+    return boundPort.load(std::memory_order_acquire);
 }

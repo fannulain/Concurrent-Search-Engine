@@ -34,6 +34,7 @@
   let wsReconnectTimer = null;
   let activePipelineStart = 0;
   let activeHighlightTerms = [];
+  let searchInFlight = false;
 
   function setStatusText(el, ok, text) {
     el.textContent = text;
@@ -232,6 +233,19 @@
 
     ws.addEventListener("close", () => {
       updateWsBadge("fail", "WS: disconnected");
+      if (searchInFlight) {
+        searchInFlight = false;
+        els.searchBtn.disabled = false;
+        showFeedback(els.searchError, "WebSocket connection closed during search. Please retry.", "error");
+        if (els.stageExpansion.classList.contains("stage-running")) {
+          setStageState(els.stageExpansion, els.stageExpansionMeta, "failed", "failed", "Connection lost");
+        }
+        if (els.stageSearch.classList.contains("stage-running") || els.stageSearch.classList.contains("stage-pending")) {
+          setStageState(els.stageSearch, els.stageSearchMeta, "failed", "failed", "Aborted");
+        }
+        setStageState(els.stageDone, els.stageDoneMeta, "failed", "failed", "Disconnected");
+        els.pipelineSummary.textContent = "Connection lost";
+      }
       clearTimeout(wsReconnectTimer);
       wsReconnectTimer = setTimeout(connectWebSocket, 3000);
     });
@@ -257,6 +271,7 @@
         setStageState(els.stageSearch, els.stageSearchMeta, "failed", "failed", "Aborted");
         setStageState(els.stageDone, els.stageDoneMeta, "failed", "failed", "Error");
         els.pipelineSummary.textContent = "Pipeline failed";
+        searchInFlight = false;
         els.searchBtn.disabled = false;
         return;
       }
@@ -294,6 +309,7 @@
         setStageState(els.stageDone, els.stageDoneMeta, "completed", "completed",
           "Total elapsed: " + elapsedMs + " ms");
         els.pipelineSummary.textContent = "Completed in " + elapsedMs + " ms";
+        searchInFlight = false;
         els.searchBtn.disabled = false;
       }
     });
@@ -334,6 +350,7 @@
       setStageState(els.stageDone, els.stageDoneMeta, "failed", "failed", "Error");
       els.pipelineSummary.textContent = "Search failed";
     } finally {
+      searchInFlight = false;
       els.searchBtn.disabled = false;
     }
   }
@@ -384,6 +401,7 @@
       return;
     }
 
+    searchInFlight = true;
     els.searchBtn.disabled = true;
     activePipelineStart = performance.now();
     resetPipeline(mode);
@@ -398,6 +416,7 @@
       setStageState(els.stageExpansion, els.stageExpansionMeta, "failed", "failed", "WebSocket disconnected");
       setStageState(els.stageDone, els.stageDoneMeta, "failed", "failed", "Error");
       els.pipelineSummary.textContent = "WebSocket unavailable";
+      searchInFlight = false;
       els.searchBtn.disabled = false;
       connectWebSocket();
       return;

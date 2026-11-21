@@ -63,7 +63,7 @@ net::awaitable<bool> fetchHasModel(std::string host, std::string port, std::stri
     beast::error_code ignored;
     stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
 
-    co_return response.result() == http::status::ok &&modelListContains(response.body(), model);
+    co_return (response.result() == http::status::ok) && modelListContains(response.body(), model);
 }
 
 struct GenerateHttpResponse
@@ -152,11 +152,26 @@ OllamaService::OllamaService(std::string host, std::string port, std::string mod
 
 OllamaService::~OllamaService()
 {
-    workerPool.stop(true);
+    stop(false);
+}
+
+void OllamaService::stop(bool finishTasks)
+{
+    stopping.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(activeIocMtx);
+        if (activeIoc != nullptr)
+        {
+            activeIoc->stop();
+        }
+    }
+    workerPool.stop(finishTasks);
 }
 
 bool OllamaService::checkHealth(std::chrono::milliseconds timeout) const
 {
+    if (stopping.load(std::memory_order_acquire)) return false;
+
     net::io_context ioc;
     std::optional<bool> result;
     net::co_spawn(ioc, fetchHasModel(host, port, model, timeout),
@@ -186,6 +201,26 @@ ExpansionResult OllamaService::performExpansion(const std::string &query) const
 
         const std::chrono::milliseconds timeout(timeoutMs);
         net::io_context ioc;
+        {
+            std::lock_guard<std::mutex> lock(activeIocMtx);
+            if (stopping.load(std::memory_order_acquire))
+            {
+                result.error = "Ollama service is stopping";
+                return result;
+            }
+            activeIoc = &ioc;
+        }
+        struct ActiveIocGuard
+        {
+            std::mutex &mtx;
+            net::io_context *&slot;
+            ~ActiveIocGuard()
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                slot = nullptr;
+            }
+        } activeIocGuard{activeIocMtx, activeIoc};
+
         std::optional<GenerateHttpResponse> httpResponse;
         std::exception_ptr requestError;
 
@@ -203,6 +238,12 @@ ExpansionResult OllamaService::performExpansion(const std::string &query) const
                       });
 
         ioc.run_for(timeout);
+
+        if (stopping.load(std::memory_order_acquire))
+        {
+            result.error = "Ollama service is stopping";
+            return result;
+        }
 
         if (requestError)
         {
