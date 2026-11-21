@@ -1,63 +1,66 @@
 @startuml
 actor Admin
-participant "SearchServer" as Server
+participant "RequestHandler" as Handler
 participant "IndexerService" as Indexer
 participant "ThreadPool (N threads)" as Pool
 participant "Tokenizer" as Tok
 participant "DocumentStore" as Docs
 participant "ConcurrentInvertedIndex\n(new)" as Index
-participant "Bucket [0..63]" as Buckets
+participant "Bucket [0..B-1]" as Buckets
 
-Admin -> Server : POST /api/index {"threads": N}
-activate Server
+Admin -> Handler : POST /api/index {"threads": N} (1..128)
+activate Handler
 
 alt threads out of range or invalid JSON
-    Server --> Admin : 400 Bad Request {"error": ...}
-else build_in_progress.compare_exchange(false, true) fails
-    Server --> Admin : 409 Conflict {"error": "indexing in progress"}
+    Handler --> Admin : 400 Bad Request {"error": ...}
+else buildInProgress.compare_exchange_strong(false, true) fails
+    Handler --> Admin : 409 Conflict {"error": "Indexing is already in progress"}
 else
-    Server -> Indexer : buildIndex(N)
+    Handler -> Indexer : buildIndex(N)
     activate Indexer
 
-    Indexer -> Index ** : create(64 buckets)
+    Indexer -> Indexer : scanFiles(datasetPath)\n+ LPT sort by file size desc
+    Indexer -> Index ** : create(indexBuckets)
     Indexer -> Docs ** : create()
     Indexer -> Pool ** : create(N)
-    Indexer -> Indexer : scanFiles(dataset_path)
 
     loop For each book file
-        Indexer -> Pool : enqueue(index_book_task)
+        Indexer -> Pool : addTask(indexFile)
     end
 
     par N workers in parallel
-        loop For each ~1000-word chunk of the book
-            Pool -> Tok : tokenize(chunk_text)
-            Tok --> Pool : tokens
-            Pool -> Pool : build local map term -> tf (no locks)
-            Pool -> Docs : add(DocumentMeta)
-            note right: short critical section\n(std::mutex)
-            Docs --> Pool : internal doc_id
-            Pool -> Index : addDocument(doc_id, term_tf)
-            activate Index
-            loop For each affected bucket i = hash(term) % 64
-                Index -> Buckets : unique_lock(shared_mutex[i])
-                activate Buckets
-                Index -> Buckets : append Posting{doc_id, tf}
-                Index -> Buckets : unlock()
-                deactivate Buckets
-            end
-            Index --> Pool : done
-            deactivate Index
+        loop For each ~1000-word chunk (batches of up to 16)
+            Pool -> Tok : tokenizeToTermFreq(chunk, termFreq)
+            Tok --> Pool : tokenCount
+            Pool -> Pool : accumulate metaBatch & postingBatch
         end
+        Pool -> Docs : addBatch(metaBatch)
+        note right: unique_lock(std::shared_mutex)
+        Docs --> Pool : baseDocId
+        Pool -> Index : addPostingBatch(baseDocId, docCount, postingBatch)
+        activate Index
+        loop For each affected bucket i in 0..B-1
+            Index -> Buckets : unique_lock(shared_mutex[i])
+            activate Buckets
+            Index -> Buckets : append Posting{docId, tf}
+            Index -> Buckets : unlock()
+            deactivate Buckets
+        end
+        Index --> Pool : done
+        deactivate Index
     end
 
     Indexer -> Pool : wait all futures
-    Indexer -> Pool !! : destroy / join
-    Indexer --> Server : shared_ptr<IndexSnapshot> (index, docs, stats)
+    Indexer -> Pool !! : stop(true) / join
+    Indexer -> Index : shrinkToFit()
+    Indexer -> Docs : seal()
+    note right: enables lock-free sealed reads
+    Indexer --> Handler : shared_ptr<IndexSnapshot>
     deactivate Indexer
 
-    Server -> Server : snapshot.store(new_snapshot)\n(atomic swap)
-    Server -> Server : build_in_progress = false
-    Server --> Admin : 200 OK {"status": "ok", "documents_indexed": D, "time_ms": T}
+    Handler -> Handler : activeSnapshot.exchange(newSnapshot)\n+ malloc_trim(0)
+    Handler -> Handler : buildInProgress = false
+    Handler --> Admin : 200 OK {"status": "ok", "documents_indexed": D, "time_ms": T}
 end
-deactivate Server
+deactivate Handler
 @enduml

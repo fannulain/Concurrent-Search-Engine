@@ -19,9 +19,13 @@ class "TaskQueue<TaskType>" as TaskQueue {
   - condVar: std::condition_variable
   - stopFlag: bool
   - pauseFlag: bool
+  - pushedCount: int
   + empty(): bool
   + size(): int
+  + getPushedCount(): int
+  + isPaused(): bool
   + push(task): bool
+  + emplace(args): bool
   + pop(task: TaskType&): bool
   + clear(): void
   + stop(terminateInstantly: bool): vector<TaskType>
@@ -33,8 +37,7 @@ class ThreadPool {
   - queue: unique_ptr<TaskQueue<function<void()>>>
   - workers: vector<thread>
   - stopFlag: atomic<bool>
-  - pauseFlag: atomic<bool>
-  - tasksSubmitted: atomic<int>
+  - stopMtx: std::mutex
   - tasksCompleted: atomic<int>
   + ThreadPool(threadCount: int = 0)
   + addTask<Func, Args...>(func, args): future<R>
@@ -63,6 +66,12 @@ class Posting <<struct>> {
   + tf: uint32_t
 }
 
+class BatchPosting <<struct>> {
+  + localDocOffset: uint32_t
+  + term: string
+  + tf: uint32_t
+}
+
 class Bucket <<struct>> {
   + mtx: std::shared_mutex
   + postings: unordered_map<string, vector<Posting>>
@@ -74,7 +83,10 @@ class ConcurrentInvertedIndex {
   - documentCount: atomic<uint32_t>
   + ConcurrentInvertedIndex(bucketCount: size_t = 64)
   + addDocument(docId: uint32_t, termFreq: unordered_map<string, uint32_t>): void
+  + addPostingBatch(baseDocId: uint32_t, docCount: uint32_t, entries: vector<BatchPosting>): void
   + getPostings(term: string): vector<Posting>
+  + visitPostings(term: string, visitor: function<void(const vector<Posting>&)>): void
+  + shrinkToFit(): void
   + getDocumentCount(): uint32_t
   + getTermCount(): size_t
   + getBucketCount(): size_t
@@ -92,11 +104,17 @@ class DocumentMeta <<struct>> {
 class DocumentStore {
   - mtx: std::shared_mutex
   - docs: vector<DocumentMeta>
+  - totalTokens: uint64_t
+  - sealed: atomic<bool>
   + add(meta: DocumentMeta): uint32_t
+  + addBatch(batch: vector<DocumentMeta>&): uint32_t
+  + seal(): void
+  + isSealed(): bool
   + get(internalId: uint32_t): DocumentMeta
   + getTokenCount(internalId: uint32_t): uint32_t
   + getDocId(internalId: uint32_t): string
   + size(): uint32_t
+  + getAverageTokenCount(): double
   + readText(internalId: uint32_t): string
 }
 
@@ -153,10 +171,15 @@ class OllamaService {
   - tokenizer: const Tokenizer&
   - timeoutMs: int
   - workerPool: ThreadPool
+  - stopping: atomic<bool>
+  - activeIocMtx: std::mutex
+  - activeIoc: boost::asio::io_context*
   + OllamaService(host, port, model, tokenizer, timeoutMs = 30000)
+  + stop(finishTasks: bool = false): void
   + checkHealth(timeout: milliseconds): bool
   + expandQuery(query: string): future<ExpansionResult>
   + expandQueryAsync(query: string, onComplete: function<void(ExpansionResult)>): void
+  + getModel(): const string&
 }
 
 class RequestHandler {
@@ -188,13 +211,19 @@ class SearchServer {
   - serverThreads: int
   - requestHandler: RequestHandler&
   - ioc: boost::asio::io_context
+  - signals: boost::asio::signal_set
   - networkPool: unique_ptr<ThreadPool>
+  - isRunning: atomic<bool>
+  - boundPort: atomic<uint16_t>
   + start(): void
   + stop(): void
+  + waitUntilReady(timeout: milliseconds): bool
+  + getBoundPort(): uint16_t
 }
 
 ThreadPool *-- TaskQueue : owns >
 ConcurrentInvertedIndex *-- Bucket : contains >
+ConcurrentInvertedIndex ..> BatchPosting : ingests >
 Bucket o-- Posting : stores >
 DocumentStore *-- DocumentMeta : stores >
 IndexSnapshot *-- ConcurrentInvertedIndex

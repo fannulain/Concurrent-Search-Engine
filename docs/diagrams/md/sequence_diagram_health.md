@@ -1,26 +1,26 @@
 @startuml
 actor Admin
-participant "SearchServer" as Server
+participant "RequestHandler" as Handler
 participant "OllamaService" as OllamaSvc
 participant "Ollama API\n(External)" as OllamaAPI
 
-Admin -> Server : GET /api/health
-activate Server
-Server -> OllamaSvc : checkHealth()
+Admin -> Handler : GET /api/health
+activate Handler
+Handler -> OllamaSvc : checkHealth(2000ms)
 activate OllamaSvc
 OllamaSvc -> OllamaAPI : GET /api/tags (timeout 2 s)
 activate OllamaAPI
 alt Ollama reachable
     OllamaAPI --> OllamaSvc : 200 OK {"models": [...]}
     OllamaSvc -> OllamaSvc : configured model present?
-    OllamaSvc --> Server : true / false
+    OllamaSvc --> Handler : true / false
 else connection refused / timeout
     OllamaAPI --> OllamaSvc : error
-    OllamaSvc --> Server : false
+    OllamaSvc --> Handler : false
 end
 deactivate OllamaAPI
 deactivate OllamaSvc
-Server --> Admin : 200 OK {"status": "ok", "ollama": true|false}
+Handler --> Admin : 200 OK {"status": "ok", "ollama": true|false}
 note right: Always 200 while the\nserver process is alive
-deactivate Server
+deactivate Handler
 @enduml

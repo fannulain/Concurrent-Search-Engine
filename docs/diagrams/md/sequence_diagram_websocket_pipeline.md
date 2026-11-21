@@ -1,60 +1,71 @@
 @startuml
 actor Client
-participant "SearchServer\n(WebSocket Handler)" as Server
+participant "WebSocketSession\n(Boost.Asio strand)" as WS
 participant "OllamaService" as OllamaSvc
 participant "ThreadPool\n(Single-Thread)" as OllamaPool
 participant "Ollama API\n(External)" as OllamaAPI
+participant "RequestHandler" as Handler
 participant "SearchEngine" as Engine
 participant "ConcurrentInvertedIndex\n(current snapshot)" as Index
+participant "DocumentStore\n(sealed)" as Docs
 
-Client -> Server : WS Connect (/ws/search)
-Client -> Server : Message {"query": "space movies"}
-activate Server
+Client -> WS : WS Upgrade (/ws/search)
+Client -> WS : Message {"query": "space movies"}
+activate WS
 
-alt invalid JSON or empty query
-    Server -> Client : WS Message {"stage": "error", "data": {"message": ...}}
+alt invalid JSON or empty query or limit out of [1..100]
+    WS -> Client : WS Message {"stage": "error", "data": {"message": ...}}
 else valid query
     == Stage 1: Query Expansion ==
-    Server -> OllamaSvc : expandQuery("space movies")
+    WS -> OllamaSvc : expandQueryAsync(query, callback)
     activate OllamaSvc
-    OllamaSvc -> OllamaPool : enqueue(LLM request task)
+    OllamaSvc -> OllamaPool : addTask(performExpansion)
     activate OllamaPool
-    OllamaSvc --> Server : std::future<ExpansionResult>
+    OllamaSvc --> WS : return immediately
     deactivate OllamaSvc
-    note over Server: Network thread is released;\nthe session resumes when the future is ready.
-    OllamaPool -> OllamaAPI : POST /api/generate\n{"model": "qwen2.5:0.5b", "format": "json", "stream": false}
+    note over WS: Network thread is released;\ncontinuation posted via net::post(strand).
+    OllamaPool -> OllamaAPI : POST /api/generate\n{"model": OLLAMA_MODEL, "format": "json", "stream": false}
     activate OllamaAPI
-    note right: Waiting for generation.\nOther WS clients are queued in the pool.
+    note right: Sequential 1-thread worker.\nOther WS clients queue cleanly.
     alt Ollama responds in time
         OllamaAPI --> OllamaPool : {"terms": ["sci-fi", "stars", ...]}
         OllamaPool -> OllamaPool : tokenize, dedupe, limit to 10
-        OllamaPool --> Server : expanded_terms
-        Server -> Client : WS Message {"stage": "query_expansion",\n"data": {"original": "space movies", "expanded_terms": [...]}}
+        OllamaPool -> WS : net::post(strand, onExpansionComplete)
+        WS -> Client : WS Message {"stage": "query_expansion",\n"data": {"original": "space movies", "expanded_terms": [...]}}
     else unavailable / timeout (30 s) / unparsable
         OllamaAPI --> OllamaPool : error
-        OllamaPool --> Server : empty result + error
-        Server -> Client : WS Message {"stage": "query_expansion",\n"data": {"original": ..., "expanded_terms": [], "error": ...}}
+        OllamaPool -> WS : net::post(strand, onExpansionComplete + error)
+        WS -> Client : WS Message {"stage": "query_expansion",\n"data": {"original": ..., "expanded_terms": [], "error": ...}}
     end
     deactivate OllamaAPI
     deactivate OllamaPool
 
     == Stage 2: Keyword Search ==
-    Server -> Server : snap = snapshot.load()
-    Server -> Engine : search(snap, original (w=1.0) + expanded (w=0.5), 10)
+    WS -> Handler : getSnapshot()
+    Handler --> WS : shared_ptr<const IndexSnapshot>
+    WS -> Engine : buildWeightedTerms(original w=1.0, expanded w=0.5)
+    WS -> Engine : search(*snap, weightedTerms, limit)
     activate Engine
-    Engine -> Index : getPostings(term) for each term
-    activate Index
-    note right: Reading buckets via\nshared_lock (shared_mutex)
-    Index --> Engine : posting lists
-    deactivate Index
-    Engine -> Engine : TF-IDF, normalize to [0..1], Top-K, snippets
-    Engine --> Server : vector<SearchResult>
+    Engine -> Docs : getAverageTokenCount()
+    loop For each weighted term
+        Engine -> Index : visitPostings(term, visitor)
+        activate Index
+        note right: shared_lock on bucket;\nzero posting vector copy
+        Index -> Docs : getTokenCount(docId) (lock-free)
+        Index --> Engine : accumulate BM25 in thread_local buffer
+        deactivate Index
+    end
+    Engine -> Engine : normalize to [0..1], partial_sort Top-K
+    loop For each Top-K result
+        Engine -> Docs : getDocId / readText (from disk)
+    end
+    Engine --> WS : vector<SearchResult>
     deactivate Engine
 
-    Server -> Client : WS Message {"stage": "keyword_search", "data": {"results": [...], "time_ms": 12}}
+    WS -> Client : WS Message {"stage": "keyword_search", "data": {"results": [...], "time_ms": T}}
 
     == Stage 3: Done ==
-    Server -> Client : WS Message {"stage": "done"}
+    WS -> Client : WS Message {"stage": "done"}
 end
-deactivate Server
+deactivate WS
 @enduml

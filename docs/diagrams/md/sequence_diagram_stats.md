@@ -1,19 +1,19 @@
 @startuml
 actor Admin
-participant "SearchServer" as Server
+participant "RequestHandler" as Handler
 participant "IndexSnapshot\n(current)" as Snap
 
-Admin -> Server : GET /api/stats
-activate Server
-Server -> Server : snap = snapshot.load()
+Admin -> Handler : GET /api/stats
+activate Handler
+Handler -> Handler : snap = activeSnapshot.load()
 alt index not built yet (snap == nullptr)
-    Server --> Admin : 200 OK {"documents": 0, "index_build_time_ms": 0, "threads_used": 0}
+    Handler --> Admin : 200 OK {"documents": 0, "index_build_time_ms": 0, "threads_used": 0}
 else
-    Server -> Snap : stats
+    Handler -> Snap : stats
     activate Snap
-    Snap --> Server : IndexStats {documents, build_time_ms, threads_used}
+    Snap --> Handler : IndexStats {documents, buildTimeMs, threadsUsed}
     deactivate Snap
-    Server --> Admin : 200 OK {"documents": D, "index_build_time_ms": T, "threads_used": N}
+    Handler --> Admin : 200 OK {"documents": D, "index_build_time_ms": T, "threads_used": N}
 end
-deactivate Server
+deactivate Handler
 @enduml
