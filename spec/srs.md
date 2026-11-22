@@ -21,7 +21,7 @@ See Section 11 (Glossary). Primary references:
 - A. Williams, *C++ Concurrency in Action*.
 - Ollama API documentation: https://github.com/ollama/ollama/blob/main/docs/api.md
 - Conventional Commits: https://www.conventionalcommits.org/
-- Google C++ Style Guide: https://google.github.io/styleguide/cppguide.html
+- Microsoft C++ / Allman formatting specification (enforced via `.clang-format`).
 
 ---
 
@@ -43,7 +43,7 @@ See Section 11 (Glossary). Primary references:
 | CLI client | Python 3 (`./search "query"`) |
 | LLM | Ollama, model `qwen2.5:0.5b` (configurable via env `OLLAMA_MODEL`) |
 | Containerization | Docker, Docker Compose |
-| Testing | GoogleTest, ThreadSanitizer (TSan), Python benchmark scripts |
+| Testing | GoogleTest, ThreadSanitizer (TSan), Python `unittest` + Locust load/spike suite, benchmark scripts |
 | Source control | Git / GitHub, Conventional Commits |
 
 ### 3.2 Design Constraints
@@ -64,13 +64,13 @@ See Section 11 (Glossary). Primary references:
 | `SearchServer` | Boost.Asio acceptor & signal handling, manages the network `ThreadPool` |
 | `ClientSession` / `WebSocketSession` | Boost.Beast HTTP and WebSocket session handlers |
 | `RequestHandler` | REST routing, request validation, JSON serialization, owns the active index snapshot |
-| `ThreadPool` / `TaskQueue` | Custom fixed-size pool of worker threads with a thread-safe `TaskQueue`; returns `std::future` per task |
-| `IndexerService` | Recursively scans the dataset, strips Gutenberg markers, splits books into documents, distributes tasks to an Indexer `ThreadPool` with $N$ threads |
+| `ThreadPool` / `TaskQueue` | Custom fixed-size pool of worker threads with a thread-safe `TaskQueue`, serialized `stop()` synchronization, and `std::future` support |
+| `IndexerService` | Recursively scans the dataset, sorts files LPT-descending by size, strips Gutenberg markers, batches up to 16 chunks, distributes tasks across an Indexer `ThreadPool` with $N$ threads, and seals the snapshot |
 | `Tokenizer` | Text normalization: lowercase, strip punctuation/digits, stop-word filtering |
-| `ConcurrentInvertedIndex` | Custom thread-safe inverted index with striped locking (Section 7.1) |
-| `DocumentStore` | Thread-safe registry of document metadata (docId, filePath, byteOffset, byteLength, tokenCount) |
-| `SearchEngine` | Executes keyword search over an index snapshot, computes TF-IDF scores, builds snippets |
-| `OllamaService` | HTTP client for Ollama; query expansion via `/api/generate`; availability check; single-thread worker |
+| `ConcurrentInvertedIndex` | Custom thread-safe inverted index with striped locking, `addPostingBatch`, `visitPostings`, and `shrinkToFit` (Section 7.1) |
+| `DocumentStore` | Thread-safe registry of document metadata (`docId`, `filePath`, `byteOffset`, `byteLength`, `tokenCount`) supporting `addBatch` and lock-free reads once `seal()` is called |
+| `SearchEngine` | Executes keyword search over an index snapshot using zero-copy `visitPostings`, thread-local sparse score buffers, Okapi BM25 scoring, and Top-K snippets |
+| `OllamaService` | HTTP client for Ollama; query expansion via `/api/generate`; availability check; 1-thread worker queue with immediate in-flight cancellation via `stop()` |
 | `Config` | Parses environment variables into server, dataset, index, and Ollama settings |
 | Web UI (Nginx) | Search form, results list, visualization of pipeline stages; reverse-proxies `/api` and `/ws` to the server |
 | CLI client (Python) | Command-line search (`./search`) via REST (`keyword`) and WebSocket (`stream`) |
@@ -107,12 +107,12 @@ All diagrams are stored in `docs/diagrams/`: PlantUML sources in `md/`, rendered
 - **Actor:** Administrator
 - **Description:** Triggers parallel indexing of the dataset with $N$ threads.
 - **Main flow:**
-  1. The server validates `threads` ($1 \le N \le 64$).
-  2. `IndexerService` creates an Indexer `ThreadPool` with exactly $N$ threads.
-  3. The dataset directory is scanned; each book file becomes one task (see Section 8 for splitting into documents).
-  4. Workers tokenize documents, build a local `term → tf` map per document and insert postings into a **new** `ConcurrentInvertedIndex`.
-  5. After all futures complete, the pool is joined and destroyed.
-  6. The new index is published by an atomic snapshot swap (Section 7.3). Statistics are updated.
+  1. The server validates `threads` ($1 \le N \le 128$).
+  2. `IndexerService` scans the dataset directory and sorts files descending by size (LPT scheduling), then creates an Indexer `ThreadPool` with exactly $N$ threads and a new `IndexSnapshot`.
+  3. Each book file becomes one task (see Section 8 for splitting into documents).
+  4. Workers tokenize chunks (`tokenizeToTermFreq`), batch up to 16 chunks into `DocumentStore::addBatch` and `ConcurrentInvertedIndex::addPostingBatch`, inserting postings into the **new** `ConcurrentInvertedIndex`.
+  5. After all futures complete, the pool is joined and destroyed, `index.shrinkToFit()` compacts posting vectors, and `docs.seal()` enables lock-free search reads.
+  6. The new index is published by an atomic snapshot swap (Section 7.3) followed by `malloc_trim(0)`. Statistics are updated.
   7. The server returns the number of indexed documents and the build time.
 - **Alternative flows:**
   - **A1:** Invalid body or `threads` out of range → `400 Bad Request`.
@@ -133,7 +133,7 @@ All diagrams are stored in `docs/diagrams/`: PlantUML sources in `md/`, rendered
 #### UC-4: REST Keyword Search (`POST /api/search`)
 - **Actor:** Client
 - **Description:** Synchronous keyword search over the inverted index. **Does not** invoke the LLM.
-- **Main flow:** Validate request → tokenize query with the same `Tokenizer` as indexing → look up postings under shared locks → compute TF-IDF scores → take Top-K → build snippets → respond.
+- **Main flow:** Validate request → tokenize query with the same `Tokenizer` as indexing → inspect postings in-place via `visitPostings` under shared locks → compute Okapi BM25 scores using lock-free sealed `DocumentStore` metadata → take Top-K → build snippets → respond.
 - **Alternative flows:**
   - **A1:** Empty `query`, `mode` other than `"keyword"`, or `limit` outside $[1, 100]$ → `400 Bad Request`.
   - **A2:** Index not built yet → `200 OK` with empty `results`.
@@ -211,14 +211,14 @@ Allowed extensions: `"error"` field inside `query_expansion.data` (fallback, UC-
 
 ### 7.1 Concurrent Inverted Index: Striped Locking
 The `ConcurrentInvertedIndex` is divided into a fixed number of buckets (default $B = 64$, configurable, power of two). Each bucket contains its own `std::unordered_map<std::string, std::vector<Posting>>` protected by its own `std::shared_mutex`, where `Posting = {uint32_t doc_id; uint32_t tf;}`.
-- **Write (indexing):** A worker first builds a local `term → tf` map for the whole document (no locks), groups terms by bucket $i = \text{hash}(term) \bmod B$ and acquires a `std::unique_lock` on each affected bucket **once** per document. At most one bucket lock is held at any time, which rules out deadlocks.
-- **Read (searching):** Readers acquire `std::shared_lock` on the buckets of the query terms; multiple searches proceed in parallel.
+- **Write (indexing):** A worker builds a local `term → tf` map per chunk, accumulates up to 16 chunks into a `MetaBatch` and `BatchPosting` buffer, appends metadata under one `DocumentStore::addBatch` lock, groups batch entries by bucket $i = \text{hash}(term) \bmod B$, and acquires `std::unique_lock` on each affected bucket in ascending order $0 \dots B-1$. At most one bucket lock is held at any time, which rules out deadlocks.
+- **Read (searching):** Readers invoke `visitPostings` under a `std::shared_lock` on the buckets of query terms (zero posting-vector copy) and read `DocumentStore` lock-free once `seal()` has run; multiple searches proceed in parallel.
 - **Document frequency** is derived from the posting list length; the global document count is a `std::atomic<uint32_t>`.
 
 ### 7.2 Thread Pools
-1. **Network pool:** A fixed-size `ThreadPool` (size = env `SERVER_THREADS`, default = `std::thread::hardware_concurrency()`) whose workers run `boost::asio::io_context::run()`. It serves REST and WebSocket sessions concurrently; keyword search is executed on these threads.
-2. **Indexer pool:** Created per `POST /api/index` call with exactly $N$ threads; destroyed (joined) after indexing completes.
-3. **Ollama worker:** A `ThreadPool` with exactly **1** thread. All query expansion requests are enqueued to it, so LLM requests are processed sequentially (preventing LLM memory exhaustion) while network threads stay unblocked. The WebSocket session continues asynchronously when the future completes.
+1. **Network pool:** A fixed-size `ThreadPool` (size = env `SERVER_THREADS`, default = `std::thread::hardware_concurrency()`, minimum `4` when unknown/1) whose workers run `boost::asio::io_context::run()`. It serves REST and WebSocket sessions concurrently; keyword search is executed on these threads.
+2. **Indexer pool:** Created per `POST /api/index` call with exactly $N$ threads ($1 \le N \le 128$); destroyed (joined) after indexing completes.
+3. **Ollama worker:** A `ThreadPool` with exactly **1** thread. All query expansion requests are enqueued to it, so LLM requests are processed sequentially (preventing LLM memory exhaustion) while network threads stay unblocked. The WebSocket session continues asynchronously via `net::post(strand, ...)`. During server shutdown, `SearchServer` joins `networkPool` and immediately calls `OllamaService::stop(false)` (cancelling any active `io_context`) while `SearchServer::ioc` and `RequestHandler` remain alive, preventing shutdown Use-After-Free.
 
 ### 7.3 Index Snapshot Swap
 - The active index is held as `std::atomic<std::shared_ptr<const IndexSnapshot>>` (C++20), where `IndexSnapshot` bundles `ConcurrentInvertedIndex`, `DocumentStore` and `IndexStats`.
@@ -250,11 +250,11 @@ The `ConcurrentInvertedIndex` is divided into a fixed number of buckets (default
 - **DR-9:** Tokens shorter than 2 characters and English stop words (fixed built-in list, ~175 words) are removed.
 - **DR-10:** The same tokenizer MUST be used for indexing, REST queries and LLM-expanded terms.
 
-### 8.4 Ranking (TF-IDF)
-For a query with terms $t$ and weights $w_t$ (1.0 original, 0.5 expanded):
+### 8.4 Ranking (Okapi BM25)
+For a query with terms $t$ and weights $w_t$ (1.0 original, 0.5 expanded), saturation parameters $k_1 = 1.2$, $b = 0.75$, and average document token count $\text{avgdl}$:
 
 $$
-\text{raw}(d) = \sum_{t \in q} w_t \cdot \frac{tf_{t,d}}{|d|} \cdot \ln\frac{N}{df_t}
+\text{idf}(t) = \ln\left(1 + \frac{\max(0, N - df_t + 0.5)}{df_t + 0.5}\right), \qquad \text{raw}(d) = \sum_{t \in q} w_t \cdot \text{idf}(t) \cdot \frac{tf_{t,d} \cdot (k_1 + 1)}{tf_{t,d} + k_1 \cdot \left(1 - b + b \cdot \frac{|d|}{\text{avgdl}}\right)}
 $$
 
 where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ — number of documents containing $t$.
@@ -274,7 +274,7 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
   | `ollama-init` | `ollama/ollama` (one-shot) | Runs `ollama pull qwen2.5:0.5b` against `ollama`, then exits |
   | `web` | `nginx:alpine` | Serves Web UI static files; proxies `/api` and `/ws` to `server:8080` |
 - **DEP-3:** The server MUST start and answer `GET /api/health` with 200 even if Ollama is still starting or the model is not yet pulled (`"ollama": false`).
-- **DEP-4:** Configuration via environment variables: `PORT` (8080), `SERVER_THREADS`, `DATASET_PATH` (`/data`), `OLLAMA_URL` (`http://ollama:11434`), `OLLAMA_MODEL` (`qwen2.5:0.5b`), `OLLAMA_TIMEOUT_MS` (30000), `INDEX_BUCKETS` (64).
+- **DEP-4:** Configuration via environment variables: `PORT` (8080), `SERVER_THREADS`, `DATASET_PATH` (`/data`), `OLLAMA_URL` (`http://ollama:11434`), `OLLAMA_MODEL` (`qwen2.5:0.5b`), `OLLAMA_TIMEOUT_MS` (30000), `INDEX_BUCKETS` (64), `MALLOC_ARENA_MAX` (16).
 - **DEP-5:** Docker health checks are defined for `server` (`/api/health`) and `ollama`.
 
 ---
@@ -282,10 +282,10 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
 ## 10. Non-Functional Requirements
 
 ### 10.1 Performance and Scalability Research
-- **NFR-P1 (Index build):** Measure index build time for `threads` = 1, 2, 4, 8, 16. Each configuration is run 5 times; the median is reported. Report speedup $S(N) = T(1) / T(N)$ and efficiency $E(N) = S(N) / N$.
-- **NFR-P2 (Throughput):** Measure throughput (requests/s) and p95 latency of `POST /api/search` (`mode=keyword`) with 1, 2, 4, 8, 16, 32, 64 concurrent clients, using a fixed set of test queries over a fixed duration (e.g. 30 s per level).
-- **NFR-P3 (Bottleneck analysis):** The report MUST analyze the bottlenecks of parallel processing: disk I/O, lock contention on buckets, memory allocation, the sequential Ollama worker (impact on WebSocket throughput), Amdahl's law limits.
-- **NFR-P4:** Benchmarks are run by reproducible scripts (`bench/bench_index.py`, `bench/bench_search.py`) which output CSV files and plots (PNG) to `bench/results/`. The hardware (CPU, cores, RAM) is recorded with each run.
+- **NFR-P1 (Index build):** Measure index build time for `threads` = 1, 2, 4, 8, 16, 32, 64, 128. Each configuration is run 5 times; the median is reported. Report speedup $S(N) = T(1) / T(N)$ and efficiency $E(N) = S(N) / N$.
+- **NFR-P2 (Throughput, Load & Spike):** Measure throughput (requests/s) and p95 latency of `POST /api/search` (`mode=keyword`) with 1, 2, 4, 8, 16, 32, 64 concurrent clients (`bench_search.py`), plus sustained load (up to 150 users) and traffic spike bursts (up to 250 users) with Locust (`bench/run_locust_suite.py`).
+- **NFR-P3 (Bottleneck analysis):** The report MUST analyze the bottlenecks of parallel processing: disk I/O, lock contention on buckets, thread oversubscription beyond physical cores (32–128 threads), memory allocation (`MALLOC_ARENA_MAX`), the sequential Ollama worker (impact on WebSocket throughput), and Amdahl's law limits.
+- **NFR-P4:** Benchmarks are run by reproducible scripts (`bench/bench_index.py`, `bench/bench_search.py`, `bench/run_locust_suite.py`) which output CSV/JSON files and plots (PNG) to `bench/results/`. The hardware (CPU, cores, RAM) is recorded with each run.
 - **NFR-P5 (Targets):** With 8 threads on an 8-core machine, the speedup of index build SHOULD be ≥ 4. Keyword search on a built index SHOULD have p95 latency < 100 ms with 1 client.
 
 ### 10.2 Reliability
@@ -294,8 +294,8 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
 - **NFR-R3:** Ollama failures MUST be handled by the fallback (UC-5 A1).
 
 ### 10.3 Code Quality and Maintainability
-- **NFR-Q1:** C++ code follows a unified Microsoft/Allman style (`PascalCase` files/classes, `camelCase` methods/variables, 4-space indentation, Allman braces, max 120 columns) enforced with `clang-format` (`.clang-format` in the repo). Python code adheres to PEP 8 / `black`.
-- **NFR-Q2:** Unit tests (GoogleTest) cover `ThreadPool`, `Tokenizer`, `ConcurrentInvertedIndex`, ranking and JSON contract serialization. Concurrency tests run the index with many writer/reader threads.
+- **NFR-Q1:** C++ code follows a unified Microsoft/Allman style (`PascalCase` files/classes, `camelCase` methods/variables, 4-space indentation, Allman braces, max 120 columns) enforced with `clang-format` (`.clang-format` in the repo). Python scripts are syntax-checked in CI and tested via `unittest`.
+- **NFR-Q2:** Unit tests cover `ThreadPool`, `Tokenizer`, `ConcurrentInvertedIndex`, `DocumentStore`, BM25 ranking, `RequestHandler`, `OllamaService`, `WebSocketSession` (GoogleTest + ThreadSanitizer), and the Python CLI (`tests/test_cli.py`). Concurrency tests stress writers, readers, pause/resume, concurrent `stop()`, and in-flight shutdown under TSan.
 - **NFR-Q3:** CI (GitHub Actions) builds the project, runs tests normally and under ThreadSanitizer, and checks formatting.
 - **NFR-Q4:** A search quality table is produced: test query, expected result, actual result (required by the report).
 
@@ -329,7 +329,7 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
 
 - **Inverted Index:** A data structure that maps each term to the list of documents (postings) in which it occurs, enabling fast full-text search with an average $O(1)$ term lookup in a hash table.
 - **Posting:** An entry in a term's posting list: document id and term frequency in that document.
-- **TF-IDF:** Term frequency × inverse document frequency — a weighting scheme that scores how important a term is for a document relative to the whole collection.
+- **TF-IDF / Okapi BM25:** Ranking schemes that weight rare query terms higher than common terms; Okapi BM25 adds non-linear term-frequency saturation ($k_1$) and document-length normalization ($b$).
 - **Query Expansion:** Enriching the user's query with synonyms and related terms (here, generated by an LLM) to increase search recall.
 - **Striped Locking:** A concurrency control pattern where a data structure is partitioned into segments (stripes/buckets), each protected by its own independent lock.
 - **Reader-Writer Lock (`std::shared_mutex`):** A lock that allows multiple concurrent readers or a single exclusive writer.
