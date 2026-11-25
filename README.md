@@ -1,6 +1,6 @@
 # Concurrent Search Engine
 
-A containerized, multi-threaded search engine in C++20 with parallel inverted index construction, striped locking, Okapi BM25 ranking, REST & WebSocket streaming APIs, and local LLM query expansion via Ollama. Coursework for *Parallel Computing* (KPI, IASA, 2026–2027).
+A containerized, multi-threaded search engine in C++20 with parallel inverted index construction, striped locking, Okapi BM25 ranking, REST & WebSocket streaming APIs, and local LLM query expansion via Ollama. Coursework for *Parallel Computing* (KPI, IASA, 2026) completed by Dolzhenkov Yehor KN-32.
 
 - **Custom `ThreadPool` & `TaskQueue`:** Built from scratch on `std::thread`, `std::mutex`, and `std::condition_variable` with `std::future` support, serialized `stop()` synchronization, and single-source-of-truth queue state.
 - **Custom `ConcurrentInvertedIndex` & Sealed `DocumentStore`:** Striped locking across 64 cache-aligned `std::shared_mutex` buckets, LPT file scheduling, 16-chunk batched ingestion (`addBatch` / `addPostingBatch`), and lock-free reads once `DocumentStore::seal()` completes.
