@@ -21,14 +21,23 @@ private:
         {
             return nullptr;
         }
-        return static_cast<T *>(::operator new(n * sizeof(T), std::align_val_t{alignof(T)}));
+        if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+        {
+            return static_cast<T *>(::operator new(n * sizeof(T), std::align_val_t{alignof(T)}));
+        }
+        return static_cast<T *>(::operator new(n * sizeof(T)));
     }
 
     static void deallocateRaw(T *ptr) noexcept
     {
         if (ptr != nullptr)
         {
-            ::operator delete(ptr, std::align_val_t{alignof(T)});
+            if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+            {
+                ::operator delete(ptr, std::align_val_t{alignof(T)});
+                return;
+            }
+            ::operator delete(ptr);
         }
     }
 

@@ -56,8 +56,15 @@ private:
         {
             return nullptr;
         }
-        auto *ptr =
-            static_cast<SlotState *>(::operator new(n * sizeof(SlotState), std::align_val_t{alignof(SlotState)}));
+        SlotState *ptr = nullptr;
+        if constexpr (alignof(SlotState) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+        {
+            ptr = static_cast<SlotState *>(::operator new(n * sizeof(SlotState), std::align_val_t{alignof(SlotState)}));
+        }
+        else
+        {
+            ptr = static_cast<SlotState *>(::operator new(n * sizeof(SlotState)));
+        }
         for (size_t i = 0; i < n; ++i)
         {
             ptr[i] = SlotState::Empty;
@@ -69,7 +76,12 @@ private:
     {
         if (ptr != nullptr)
         {
-            ::operator delete(ptr, std::align_val_t{alignof(SlotState)});
+            if constexpr (alignof(SlotState) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+            {
+                ::operator delete(ptr, std::align_val_t{alignof(SlotState)});
+                return;
+            }
+            ::operator delete(ptr);
         }
     }
 
@@ -79,14 +91,23 @@ private:
         {
             return nullptr;
         }
-        return static_cast<Slot *>(::operator new(n * sizeof(Slot), std::align_val_t{alignof(Slot)}));
+        if constexpr (alignof(Slot) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+        {
+            return static_cast<Slot *>(::operator new(n * sizeof(Slot), std::align_val_t{alignof(Slot)}));
+        }
+        return static_cast<Slot *>(::operator new(n * sizeof(Slot)));
     }
 
     static void deallocateSlots(Slot *ptr) noexcept
     {
         if (ptr != nullptr)
         {
-            ::operator delete(ptr, std::align_val_t{alignof(Slot)});
+            if constexpr (alignof(Slot) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+            {
+                ::operator delete(ptr, std::align_val_t{alignof(Slot)});
+                return;
+            }
+            ::operator delete(ptr);
         }
     }
 

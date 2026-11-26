@@ -31,7 +31,12 @@ uint32_t DocumentStore::addBatch(DynamicArray<DocumentMeta> &batch)
     }
 
     const uint32_t baseId = static_cast<uint32_t>(docs.size());
-    docs.reserve(docs.size() + batch.size());
+    const size_t needed = docs.size() + batch.size();
+    if (needed > docs.capacity())
+    {
+        const size_t grown = docs.capacity() == 0 ? 64 : docs.capacity() * 2;
+        docs.reserve(needed > grown ? needed : grown);
+    }
     for (DocumentMeta &meta : batch)
     {
         const uint32_t tok = meta.tokenCount;
