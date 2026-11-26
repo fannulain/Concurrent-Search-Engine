@@ -58,6 +58,7 @@ if(CSE_BUILD_TESTS)
 
   add_executable(cse_tests
     tests/ConcurrentInvertedIndexTest.cpp
+    tests/ContainersTest.cpp
     tests/IndexerAndSearchTest.cpp
     tests/OllamaAndWebSocketTest.cpp
     tests/RequestHandlerTest.cpp
