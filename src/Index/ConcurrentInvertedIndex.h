@@ -1,6 +1,8 @@
 #ifndef CONCURRENTINVERTEDINDEX_H
 #define CONCURRENTINVERTEDINDEX_H
 
+#include "Containers/DynamicArray.h"
+#include "Containers/HashMap.h"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -8,8 +10,6 @@
 #include <memory>
 #include <shared_mutex>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 struct Posting
 {
@@ -27,14 +27,14 @@ struct BatchPosting
 struct alignas(64) Bucket
 {
     mutable std::shared_mutex mtx;
-    std::unordered_map<std::string, std::vector<Posting>> postings;
+    HashMap<std::string, DynamicArray<Posting>> postings;
 };
 
 class ConcurrentInvertedIndex
 {
 private:
     size_t numBuckets;
-    std::vector<std::unique_ptr<Bucket>> buckets;
+    DynamicArray<std::unique_ptr<Bucket>> buckets;
     std::atomic<uint32_t> documentCount{0};
 
     size_t getBucketIndex(const std::string &term) const;
@@ -45,10 +45,11 @@ public:
     ConcurrentInvertedIndex(const ConcurrentInvertedIndex &) = delete;
     ConcurrentInvertedIndex &operator=(const ConcurrentInvertedIndex &) = delete;
 
-    void addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq);
-    void addPostingBatch(uint32_t baseDocId, uint32_t docCount, const std::vector<BatchPosting> &entries);
-    std::vector<Posting> getPostings(const std::string &term) const;
-    void visitPostings(const std::string &term, const std::function<void(const std::vector<Posting> &)> &visitor) const;
+    void addDocument(uint32_t docId, const HashMap<std::string, uint32_t> &termFreq);
+    void addPostingBatch(uint32_t baseDocId, uint32_t docCount, const DynamicArray<BatchPosting> &entries);
+    DynamicArray<Posting> getPostings(const std::string &term) const;
+    void visitPostings(const std::string &term,
+                       const std::function<void(const DynamicArray<Posting> &)> &visitor) const;
     void shrinkToFit();
 
     uint32_t getDocumentCount() const;

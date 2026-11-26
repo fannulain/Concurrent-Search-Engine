@@ -13,11 +13,11 @@ uint32_t DocumentStore::add(DocumentMeta meta)
     }
     const uint32_t internalId = static_cast<uint32_t>(docs.size());
     totalTokens += meta.tokenCount;
-    docs.push_back(std::move(meta));
+    docs.pushBack(std::move(meta));
     return internalId;
 }
 
-uint32_t DocumentStore::addBatch(std::vector<DocumentMeta> &batch)
+uint32_t DocumentStore::addBatch(DynamicArray<DocumentMeta> &batch)
 {
     if (batch.empty())
     {
@@ -35,7 +35,7 @@ uint32_t DocumentStore::addBatch(std::vector<DocumentMeta> &batch)
     for (DocumentMeta &meta : batch)
     {
         const uint32_t tok = meta.tokenCount;
-        docs.push_back(std::move(meta));
+        docs.pushBack(std::move(meta));
         totalTokens += tok;
     }
     return baseId;
@@ -44,7 +44,7 @@ uint32_t DocumentStore::addBatch(std::vector<DocumentMeta> &batch)
 void DocumentStore::seal()
 {
     std::unique_lock<std::shared_mutex> lock(mtx);
-    docs.shrink_to_fit();
+    docs.shrinkToFit();
     sealed.store(true, std::memory_order_release);
 }
 

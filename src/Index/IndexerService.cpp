@@ -1,4 +1,6 @@
 #include "IndexerService.h"
+#include "Containers/DynamicArray.h"
+#include "Containers/HashMap.h"
 #include "ThreadPool/ThreadPool.h"
 #include <algorithm>
 #include <cctype>
@@ -10,9 +12,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace
 {
@@ -120,12 +120,12 @@ void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer
     const std::string bookId = filePath.stem().string();
     const std::string filePathStr = filePath.string();
 
-    std::unordered_map<std::string, uint32_t> termFreq;
+    HashMap<std::string, uint32_t> termFreq;
     termFreq.reserve(512);
 
-    std::vector<DocumentMeta> metaBatch;
+    DynamicArray<DocumentMeta> metaBatch;
     metaBatch.reserve(BATCH_CHUNK_LIMIT);
-    std::vector<BatchPosting> postingBatch;
+    DynamicArray<BatchPosting> postingBatch;
     postingBatch.reserve(BATCH_CHUNK_LIMIT * 256);
 
     auto flushBatch = [&]()
@@ -190,11 +190,11 @@ void indexFile(const std::filesystem::path &filePath, const Tokenizer &tokenizer
         meta.byteOffset = static_cast<uint64_t>(chunkStart);
         meta.byteLength = static_cast<uint32_t>(chunkLen);
         meta.tokenCount = tokenCount;
-        metaBatch.push_back(std::move(meta));
+        metaBatch.pushBack(std::move(meta));
 
         for (const auto &[term, tf] : termFreq)
         {
-            postingBatch.push_back(BatchPosting{localOffset, term, tf});
+            postingBatch.pushBack(BatchPosting{localOffset, term, tf});
         }
 
         if (metaBatch.size() >= BATCH_CHUNK_LIMIT)
@@ -229,7 +229,7 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         throw std::runtime_error("Dataset directory does not exist: " + datasetPath);
     }
 
-    std::vector<FileEntry> files;
+    DynamicArray<FileEntry> files;
     std::error_code scanEc;
     std::filesystem::recursive_directory_iterator it(
         datasetPath, std::filesystem::directory_options::skip_permission_denied, scanEc);
@@ -247,7 +247,7 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         {
             std::error_code sizeEc;
             const uintmax_t fileSize = it->file_size(sizeEc);
-            files.push_back(FileEntry{it->path(), sizeEc ? 0 : fileSize});
+            files.pushBack(FileEntry{it->path(), sizeEc ? 0 : fileSize});
         }
     }
 
@@ -256,7 +256,6 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
         throw std::runtime_error("No .txt files found in dataset directory: " + datasetPath);
     }
 
-    // sort descending by size (LPT) to minimize tail latency on large worker counts
     std::sort(files.begin(), files.end(),
               [](const FileEntry &a, const FileEntry &b)
               {
@@ -269,14 +268,14 @@ std::shared_ptr<IndexSnapshot> IndexerService::buildIndex(int threadCount) const
 
     {
         ThreadPool pool(threadCount);
-        std::vector<std::future<void>> futures;
+        DynamicArray<std::future<void>> futures;
         futures.reserve(files.size());
 
         for (const auto &entry : files)
         {
             const auto &filePath = entry.path;
-            futures.push_back(pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(),
-                                            &logMtx]() { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
+            futures.pushBack(pool.addTask([filePath, &tokenizer = this->tokenizer, snapshotPtr = snapshot.get(),
+                                           &logMtx]() { indexFile(filePath, tokenizer, *snapshotPtr, logMtx); }));
         }
 
         for (auto &fut : futures)

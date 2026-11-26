@@ -1,10 +1,10 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
+#include "Containers/HashMap.h"
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -20,7 +20,7 @@ public:
 
     bool isStopWord(std::string_view token) const;
     std::vector<std::string> tokenize(std::string_view text) const;
-    uint32_t tokenizeToTermFreq(std::string_view text, std::unordered_map<std::string, uint32_t> &termFreq) const;
+    uint32_t tokenizeToTermFreq(std::string_view text, HashMap<std::string, uint32_t> &termFreq) const;
 };
 
 #endif // TOKENIZER_H

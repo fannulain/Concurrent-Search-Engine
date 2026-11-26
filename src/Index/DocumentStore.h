@@ -1,11 +1,11 @@
 #ifndef DOCUMENTSTORE_H
 #define DOCUMENTSTORE_H
 
+#include "Containers/DynamicArray.h"
 #include <atomic>
 #include <cstdint>
 #include <shared_mutex>
 #include <string>
-#include <vector>
 
 struct DocumentMeta
 {
@@ -20,7 +20,7 @@ class DocumentStore
 {
 private:
     mutable std::shared_mutex mtx;
-    std::vector<DocumentMeta> docs;
+    DynamicArray<DocumentMeta> docs;
     uint64_t totalTokens = 0;
     std::atomic<bool> sealed{false};
 
@@ -31,7 +31,7 @@ public:
     DocumentStore &operator=(const DocumentStore &) = delete;
 
     uint32_t add(DocumentMeta meta);
-    uint32_t addBatch(std::vector<DocumentMeta> &batch);
+    uint32_t addBatch(DynamicArray<DocumentMeta> &batch);
     void seal();
     bool isSealed() const;
 

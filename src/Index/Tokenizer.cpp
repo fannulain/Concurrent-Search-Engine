@@ -74,16 +74,16 @@ std::vector<std::string> Tokenizer::tokenize(std::string_view text) const
     return tokens;
 }
 
-uint32_t Tokenizer::tokenizeToTermFreq(std::string_view text, std::unordered_map<std::string, uint32_t> &termFreq) const
+uint32_t Tokenizer::tokenizeToTermFreq(std::string_view text, HashMap<std::string, uint32_t> &termFreq) const
 {
     uint32_t tokenCount = 0;
     forEachToken(text,
                  [&termFreq, &tokenCount](const std::string &token)
                  {
-                     auto [it, inserted] = termFreq.try_emplace(token, 1u);
+                     auto [it, inserted] = termFreq.tryEmplace(token, 1u);
                      if (!inserted)
                      {
-                         it->second++;
+                         it->value++;
                      }
                      tokenCount++;
                  });

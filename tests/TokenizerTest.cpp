@@ -1,7 +1,7 @@
 #include "Index/Tokenizer.h"
+#include "Containers/HashMap.h"
 #include <gtest/gtest.h>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 TEST(TokenizerTest, NormalizesCaseAndSplitsOnNonLetters)
@@ -26,7 +26,7 @@ TEST(TokenizerTest, TermFreqMatchesTokenizeCounts)
     const std::string text = "Space travel, space ships, and distant stars! Stars shine in space.";
 
     const std::vector<std::string> tokens = tokenizer.tokenize(text);
-    std::unordered_map<std::string, uint32_t> termFreq;
+    HashMap<std::string, uint32_t> termFreq;
     const uint32_t count = tokenizer.tokenizeToTermFreq(text, termFreq);
 
     EXPECT_EQ(count, tokens.size());

@@ -1,11 +1,12 @@
 #include "Index/ConcurrentInvertedIndex.h"
+#include "Containers/DynamicArray.h"
+#include "Containers/HashMap.h"
 #include "Index/DocumentStore.h"
 #include <atomic>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 TEST(ConcurrentInvertedIndexTest, AddsAndRetrievesPostings)
@@ -19,7 +20,7 @@ TEST(ConcurrentInvertedIndexTest, AddsAndRetrievesPostings)
     EXPECT_EQ(index.getTermCount(), 3u);
     EXPECT_EQ(index.getBucketCount(), 16u);
 
-    const std::vector<Posting> alphaPostings = index.getPostings("alpha");
+    const DynamicArray<Posting> alphaPostings = index.getPostings("alpha");
     ASSERT_EQ(alphaPostings.size(), 2u);
     EXPECT_EQ(alphaPostings[0].docId, 0u);
     EXPECT_EQ(alphaPostings[0].tf, 2u);
@@ -48,7 +49,7 @@ TEST(ConcurrentInvertedIndexTest, ConcurrentWritersAndReadersUnderTsan)
                 for (int d = 0; d < DOCS_PER_WRITER; d++)
                 {
                     const uint32_t docId = static_cast<uint32_t>(w * DOCS_PER_WRITER + d);
-                    std::unordered_map<std::string, uint32_t> tf;
+                    HashMap<std::string, uint32_t> tf;
                     tf["shared"] = 1;
                     tf["writer_" + std::to_string(w)] = 2;
                     tf["term_" + std::to_string(d % 20)] = 3;
@@ -96,7 +97,7 @@ TEST(ConcurrentInvertedIndexTest, SupportsBatchedWritesAndVisitPostings)
     ConcurrentInvertedIndex index(16);
     DocumentStore docs;
 
-    std::vector<DocumentMeta> batch1 = {
+    DynamicArray<DocumentMeta> batch1 = {
         DocumentMeta{"doc_0", "a.txt", 0, 10, 10},
         DocumentMeta{"doc_1", "a.txt", 10, 10, 20},
     };
@@ -110,7 +111,7 @@ TEST(ConcurrentInvertedIndexTest, SupportsBatchedWritesAndVisitPostings)
                               BatchPosting{1, "alpha", 2},
                           });
 
-    std::vector<DocumentMeta> batch2 = {
+    DynamicArray<DocumentMeta> batch2 = {
         DocumentMeta{"doc_2", "b.txt", 0, 15, 30},
     };
     const uint32_t base2 = docs.addBatch(batch2);
@@ -123,7 +124,7 @@ TEST(ConcurrentInvertedIndexTest, SupportsBatchedWritesAndVisitPostings)
 
     size_t visitedCount = 0;
     index.visitPostings("alpha",
-                        [&visitedCount](const std::vector<Posting> &postings)
+                        [&visitedCount](const DynamicArray<Posting> &postings)
                         {
                             visitedCount = postings.size();
                             ASSERT_EQ(postings.size(), 2u);
@@ -135,24 +136,24 @@ TEST(ConcurrentInvertedIndexTest, SupportsBatchedWritesAndVisitPostings)
     EXPECT_EQ(visitedCount, 2u);
 
     bool calledMissing = false;
-    index.visitPostings("missing", [&calledMissing](const std::vector<Posting> &) { calledMissing = true; });
+    index.visitPostings("missing", [&calledMissing](const DynamicArray<Posting> &) { calledMissing = true; });
     EXPECT_FALSE(calledMissing);
 }
 
 TEST(ConcurrentInvertedIndexTest, DocumentStoreSealBlocksMutationsAndAllowsConcurrentReads)
 {
     DocumentStore docs;
-    std::vector<DocumentMeta> batch;
+    DynamicArray<DocumentMeta> batch;
     for (int i = 0; i < 50; i++)
     {
-        batch.push_back(DocumentMeta{"doc_" + std::to_string(i), "file.txt", 0, 100, static_cast<uint32_t>(10 + i)});
+        batch.pushBack(DocumentMeta{"doc_" + std::to_string(i), "file.txt", 0, 100, static_cast<uint32_t>(10 + i)});
     }
     docs.addBatch(batch);
     docs.seal();
 
     EXPECT_TRUE(docs.isSealed());
     EXPECT_THROW(docs.add(DocumentMeta{"late", "file.txt", 0, 1, 1}), std::logic_error);
-    std::vector<DocumentMeta> lateBatch = {DocumentMeta{"late2", "file.txt", 0, 1, 1}};
+    DynamicArray<DocumentMeta> lateBatch = {DocumentMeta{"late2", "file.txt", 0, 1, 1}};
     EXPECT_THROW(docs.addBatch(lateBatch), std::logic_error);
 
     std::vector<std::thread> readers;

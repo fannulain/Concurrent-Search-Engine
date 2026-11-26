@@ -213,7 +213,7 @@ std::vector<SearchResult> SearchEngine::search(const IndexSnapshot &snapshot, co
 
         snapshot.index.visitPostings(
             wt.term,
-            [&](const std::vector<Posting> &postings)
+            [&](const DynamicArray<Posting> &postings)
             {
                 if (postings.empty()) return;
 

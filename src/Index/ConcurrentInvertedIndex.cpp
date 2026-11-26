@@ -8,12 +8,12 @@ namespace
 
 template <typename EntryType> struct GroupedClearGuard
 {
-    std::vector<std::vector<EntryType>> &grouped;
+    DynamicArray<DynamicArray<EntryType>> &grouped;
     ~GroupedClearGuard()
     {
-        for (auto &vec : grouped)
+        for (auto &arr : grouped)
         {
-            vec.clear();
+            arr.clear();
         }
     }
 };
@@ -25,7 +25,7 @@ ConcurrentInvertedIndex::ConcurrentInvertedIndex(size_t bucketCount) : numBucket
     buckets.reserve(numBuckets);
     for (size_t i = 0; i < numBuckets; i++)
     {
-        buckets.push_back(std::make_unique<Bucket>());
+        buckets.pushBack(std::make_unique<Bucket>());
     }
 }
 
@@ -34,7 +34,7 @@ size_t ConcurrentInvertedIndex::getBucketIndex(const std::string &term) const
     return std::hash<std::string>{}(term) % numBuckets;
 }
 
-void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_map<std::string, uint32_t> &termFreq)
+void ConcurrentInvertedIndex::addDocument(uint32_t docId, const HashMap<std::string, uint32_t> &termFreq)
 {
     if (termFreq.empty())
     {
@@ -43,7 +43,7 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
     }
 
     using TermEntry = std::pair<const std::string *, uint32_t>;
-    thread_local std::vector<std::vector<TermEntry>> grouped;
+    thread_local DynamicArray<DynamicArray<TermEntry>> grouped;
     if (grouped.size() != numBuckets)
     {
         grouped.assign(numBuckets, {});
@@ -52,10 +52,9 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
 
     for (const auto &[term, tf] : termFreq)
     {
-        grouped[getBucketIndex(term)].emplace_back(&term, tf);
+        grouped[getBucketIndex(term)].emplaceBack(&term, tf);
     }
 
-    // lock only one bucket at a time to prevent deadlocks across workers
     for (size_t i = 0; i < numBuckets; i++)
     {
         if (grouped[i].empty()) continue;
@@ -64,7 +63,7 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
         auto &bucketPostings = buckets[i]->postings;
         for (const auto &[termPtr, tf] : grouped[i])
         {
-            bucketPostings[*termPtr].push_back(Posting{docId, tf});
+            bucketPostings[*termPtr].pushBack(Posting{docId, tf});
         }
         grouped[i].clear();
     }
@@ -73,7 +72,7 @@ void ConcurrentInvertedIndex::addDocument(uint32_t docId, const std::unordered_m
 }
 
 void ConcurrentInvertedIndex::addPostingBatch(uint32_t baseDocId, uint32_t docCount,
-                                              const std::vector<BatchPosting> &entries)
+                                              const DynamicArray<BatchPosting> &entries)
 {
     if (entries.empty())
     {
@@ -84,7 +83,7 @@ void ConcurrentInvertedIndex::addPostingBatch(uint32_t baseDocId, uint32_t docCo
         return;
     }
 
-    thread_local std::vector<std::vector<const BatchPosting *>> grouped;
+    thread_local DynamicArray<DynamicArray<const BatchPosting *>> grouped;
     if (grouped.size() != numBuckets)
     {
         grouped.assign(numBuckets, {});
@@ -93,10 +92,9 @@ void ConcurrentInvertedIndex::addPostingBatch(uint32_t baseDocId, uint32_t docCo
 
     for (const BatchPosting &entry : entries)
     {
-        grouped[getBucketIndex(entry.term)].push_back(&entry);
+        grouped[getBucketIndex(entry.term)].pushBack(&entry);
     }
 
-    // lock only one bucket at a time in ascending index order to prevent deadlocks
     for (size_t i = 0; i < numBuckets; i++)
     {
         if (grouped[i].empty()) continue;
@@ -105,7 +103,7 @@ void ConcurrentInvertedIndex::addPostingBatch(uint32_t baseDocId, uint32_t docCo
         auto &bucketPostings = buckets[i]->postings;
         for (const BatchPosting *entryPtr : grouped[i])
         {
-            bucketPostings[entryPtr->term].push_back(Posting{baseDocId + entryPtr->localDocOffset, entryPtr->tf});
+            bucketPostings[entryPtr->term].pushBack(Posting{baseDocId + entryPtr->localDocOffset, entryPtr->tf});
         }
         grouped[i].clear();
     }
@@ -116,7 +114,7 @@ void ConcurrentInvertedIndex::addPostingBatch(uint32_t baseDocId, uint32_t docCo
     }
 }
 
-std::vector<Posting> ConcurrentInvertedIndex::getPostings(const std::string &term) const
+DynamicArray<Posting> ConcurrentInvertedIndex::getPostings(const std::string &term) const
 {
     const size_t bucketIndex = getBucketIndex(term);
     std::shared_lock<std::shared_mutex> lock(buckets[bucketIndex]->mtx);
@@ -126,11 +124,11 @@ std::vector<Posting> ConcurrentInvertedIndex::getPostings(const std::string &ter
     {
         return {};
     }
-    return it->second;
+    return it->value;
 }
 
 void ConcurrentInvertedIndex::visitPostings(const std::string &term,
-                                            const std::function<void(const std::vector<Posting> &)> &visitor) const
+                                            const std::function<void(const DynamicArray<Posting> &)> &visitor) const
 {
     const size_t bucketIndex = getBucketIndex(term);
     std::shared_lock<std::shared_mutex> lock(buckets[bucketIndex]->mtx);
@@ -138,7 +136,7 @@ void ConcurrentInvertedIndex::visitPostings(const std::string &term,
     const auto it = buckets[bucketIndex]->postings.find(term);
     if (it != buckets[bucketIndex]->postings.end())
     {
-        visitor(it->second);
+        visitor(it->value);
     }
 }
 
@@ -171,7 +169,7 @@ void ConcurrentInvertedIndex::shrinkToFit()
         for (auto &[term, postingList] : buckets[i]->postings)
         {
             (void)term;
-            postingList.shrink_to_fit();
+            postingList.shrinkToFit();
         }
     }
 }
