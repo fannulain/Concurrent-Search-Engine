@@ -7,8 +7,8 @@ This report documents the empirical performance, scalability (1–128 indexing t
 ## 1. Test Environment & Dataset
 
 - **CPU:** `13th Gen Intel(R) Core(TM) i5-13450HX` (`16` logical cores)
-- **Host OS & RAM:** Windows 11 (`Windows-11-10.0.26200-SP0`), `15.63 GB` physical RAM
-- **Container Runtime:** Docker Desktop / Docker Engine (`7.569 GiB` VM RAM limit)
+- **Host OS & RAM:** Windows 11 (`Windows-11-10.0.26200-SP0`), `15.62 GB` physical RAM
+- **Container Runtime:** Docker Desktop / Docker Engine (`7.567 GiB` VM RAM limit)
 - **Dataset (`data/D1.7GB/`):** `2,808` Project Gutenberg `.txt` files (`1.587 GiB` / `1.704 GB` raw text)
 - **Indexed Chunks:** `200,001` documents (~1,000 words per chunk after license header/footer stripping)
 - **Server Config:** `PORT=8080`, `SERVER_THREADS=16`, `INDEX_BUCKETS=64`, `MALLOC_ARENA_MAX=16`, `OLLAMA_MODEL=qwen2.5:0.5b`
@@ -21,24 +21,24 @@ Measured across `threads` = `1, 2, 4, 8, 16, 32, 64, 128` with 5 independent run
 
 | Threads ($N$) | Documents | Median Time (ms) | Min (ms) | Max (ms) | Speedup $S(N)$ | Efficiency $E(N)$ |
 |---|---|---|---|---|---|---|
-| 1 | 200,001 | 158,351 | 149,263 | 172,729 | 1.000x | 100.0% |
-| 2 | 200,001 | 78,014 | 71,616 | 80,097 | 2.030x | 101.5% |
-| 4 | 200,001 | 48,976 | 47,655 | 51,438 | 3.233x | 80.8% |
-| 8 | 200,001 | 37,038 | 35,250 | 38,217 | 4.275x | 53.4% |
-| 16 | 200,001 | 41,039 | 39,826 | 44,179 | 3.859x | 24.1% |
-| 32 | 200,001 | 39,686 | 37,628 | 41,149 | 3.990x | 12.5% |
-| 64 | 200,001 | 45,243 | 37,023 | 55,071 | 3.500x | 5.5% |
-| 128 | 200,001 | 44,188 | 40,723 | 47,408 | 3.584x | 2.8% |
+| 1 | 200,001 | 103,699 | 97,746 | 111,138 | 1.000x | 100.0% |
+| 2 | 200,001 | 50,887 | 49,464 | 55,209 | 2.038x | 101.9% |
+| 4 | 200,001 | 31,061 | 29,816 | 32,693 | 3.339x | 83.5% |
+| 8 | 200,001 | 21,930 | 19,178 | 22,286 | 4.729x | 59.1% |
+| 16 | 200,001 | 19,021 | 17,177 | 19,717 | 5.452x | 34.1% |
+| 32 | 200,001 | 18,898 | 16,157 | 19,957 | 5.487x | 17.1% |
+| 64 | 200,001 | 17,311 | 14,614 | 19,608 | 5.990x | 9.4% |
+| 128 | 200,001 | 19,053 | 17,879 | 19,837 | 5.443x | 4.3% |
 
 ![Inverted Index Build Time vs Thread Count](../bench/results/index_build_time.png)
 
 ![Speedup and Parallel Efficiency vs Thread Count](../bench/results/index_speedup_efficiency.png)
 
 ### Observations
-- **Peak scaling at $N = 8$ threads (SRS NFR-P5 satisfied):** Median build time drops from `158.35 s` ($N=1$) to `37.04 s` ($N=8$), achieving **$S(8) = 4.28\times$** speedup (exceeding the $\ge 4\times$ requirement).
-- **Near-ideal scaling up to 4 threads:** $S(2) = 2.03\times$ ($101.5\%$ efficiency) and $S(4) = 3.23\times$ ($80.8\%$ efficiency), showing minimal lock contention across the 64 cache-aligned stripes with batched ingestion and LPT file ordering.
-- **Oversubscription plateau and degradation at $N = 16\text{–}128$:** Beyond the physical core budget of the host CPU (16 logical threads), speedup saturates around $3.5\times\text{–}4.0\times$ (`39.7–45.2 s`) while efficiency falls from `24.1%` ($N=16$) to `12.5%` ($N=32$), `5.5%` ($N=64$), and `2.8%` ($N=128$). Context-switching overhead, cross-thread contention on the bounded `MALLOC_ARENA_MAX=16` allocator arenas, and 64-bucket hash collisions during batch writes dominate once all hardware execution units are saturated.
-- **Bounded memory footprint & zero OOMs:** Steady-state `server` RSS remained at **`2.921 GiB / 7.569 GiB` (`38.59%`)** with `0` container restarts across all 40 rebuilds up to 128 threads (down from `3.017 GiB` before adding `DocumentStore::seal()` shrinking and `MALLOC_ARENA_MAX=16`).
+- **Target exceeded at $N = 8$ threads (SRS NFR-P5 satisfied):** Median build time drops from `103.70 s` ($N=1$) to `21.93 s` ($N=8$), achieving **$S(8) = 4.73\times$** speedup (`59.1%` efficiency, exceeding the $\ge 4\times$ requirement). With custom `HashMap` / `DynamicArray` containers and geometric `DocumentStore::addBatch` growth, single-thread indexing improved by 34.5% (`158.35 s → 103.70 s`) and 8-thread indexing improved by 40.8% (`37.04 s → 21.93 s`).
+- **Strong scaling up to 64 threads:** $S(2) = 2.04\times$ ($101.9\%$ efficiency) and $S(4) = 3.34\times$ ($83.5\%$ efficiency), reaching a fastest median build time of `17.31 s` at $N=64$ (`5.99x` speedup).
+- **Oversubscription plateau at $N = 16\text{–}128$:** Beyond the 16 logical cores of the CPU, median build time plateaus around `17.3–19.1 s` (`5.44x–5.99x` speedup) while parallel efficiency declines from `34.1%` ($N=16$) to `17.1%` ($N=32$), `9.4%` ($N=64$), and `4.3%` ($N=128$) due to OS context-switching overhead, allocator arena contention, and striped lock collisions.
+- **Lower memory footprint & zero OOMs:** Steady-state `server` RSS dropped to **`2.837 GiB / 7.567 GiB` (`37.49%`)** (down from `2.921 GiB` with STL containers) with `0` container restarts across all 40 rebuilds up to 128 threads.
 
 ---
 
@@ -48,25 +48,22 @@ Measured across `1, 2, 4, 8, 16, 32, 64` concurrent keep-alive clients for `30 s
 
 | Concurrent Clients | Completed Requests | Errors | Throughput (req/s) | Avg Latency (ms) | p50 (ms) | p95 (ms) | p99 (ms) |
 |---|---|---|---|---|---|---|---|
-| 1 | 531 | 0 | 17.68 | 56.56 | 55.61 | 87.75 | 107.37 |
-| 2 | 1,265 | 0 | 42.14 | 47.44 | 45.15 | 80.69 | 107.81 |
-| 4 | 2,330 | 0 | 77.57 | 51.55 | 46.70 | 88.39 | 103.78 |
-| 8 | 4,300 | 0 | 143.10 | 55.85 | 54.37 | 72.65 | 95.39 |
-| 16 | 7,238 | 0 | 240.50 | 66.43 | 65.43 | 83.40 | 93.98 |
-| 32 | 6,976 | 0 | 231.38 | 137.90 | 134.45 | 176.42 | 206.82 |
-| 64 | 7,183 | 0 | 236.57 | 268.58 | 223.11 | 424.42 | 495.53 |
+| 1 | 478 | 0 | 15.92 | 62.80 | 61.02 | 94.89 | 158.45 |
+| 2 | 1,222 | 0 | 40.71 | 49.12 | 47.75 | 81.01 | 109.88 |
+| 4 | 2,320 | 0 | 77.24 | 51.75 | 47.51 | 86.26 | 107.20 |
+| 8 | 4,198 | 0 | 139.67 | 57.22 | 55.59 | 72.83 | 98.08 |
+| 16 | 6,779 | 0 | 225.33 | 70.88 | 69.53 | 91.78 | 104.99 |
+| 32 | 6,499 | 0 | 215.39 | 148.04 | 142.74 | 198.70 | 222.66 |
+| 64 | 6,415 | 0 | 211.45 | 300.48 | 253.70 | 528.03 | 688.91 |
 
 ![Keyword Search Throughput vs Concurrent Clients](../bench/results/search_throughput.png)
 
 ![Keyword Search Latency vs Concurrent Clients](../bench/results/search_latency_p95.png)
 
-### Observations & Pre/Post Optimization Comparison
-- **Zero failures:** All `29,823` requests across all 7 concurrency levels succeeded (`0` errors).
-- **NFR-P5 (`p95 < 100 ms`) met across 1–16 clients:** Eliminating `DocumentStore::mtx` reader lock contention via `seal()`, reading postings in-place via `visitPostings()`, using a `thread_local` sparse score buffer, and deferring `getDocId()` lookup to Top-K results only yielded major gains over the initial unoptimized baseline:
-  - **1-client p95 latency:** improved from `105.58 ms` to **`87.75 ms`** (`-16.9%`, passing the `< 100 ms` target).
-  - **16-client peak throughput:** jumped from `143.42 req/s` to **`240.50 req/s`** (`+67.7%`), while p95 latency dropped from `176.65 ms` to **`83.40 ms`** (`-52.8%`).
-  - **64-client p95 latency:** improved from `695.28 ms` to **`424.42 ms`** (`-39.0%`) at `236.57 req/s`.
-- **Linear scaling up to 16 network threads:** Throughput scales almost linearly from `17.68 req/s` (1 client) to `240.50 req/s` (16 clients, matching `SERVER_THREADS=16`), then plateaus at `231–237 req/s` for 32–64 clients as socket queues absorb excess concurrency.
+### Observations & Baseline Comparison
+- **Zero failures:** All `27,911` requests across all 7 concurrency levels succeeded (`0` errors).
+- **NFR-P5 (`p95 < 100 ms`) met across 1–16 clients:** Latency stayed below `95 ms` p95 from `1` client (`94.89 ms`) up to `16` clients (`91.78 ms`, hitting `72.83 ms` at `8` clients), while remaining comfortably ahead of the pre-optimization STL baseline (`105.58 ms` 1-client p95, `143.42 req/s` and `176.65 ms` p95 at 16 clients, `695.28 ms` p95 at 64 clients).
+- **Linear scaling up to 16 network threads:** Throughput scales almost linearly from `15.92 req/s` (1 client) to **`225.33 req/s`** (16 clients, matching `SERVER_THREADS=16`), then plateaus at `211–215 req/s` for 32–64 clients as socket queues absorb excess concurrency.
 
 ---
 
@@ -78,10 +75,10 @@ Executed via [`bench/run_locust_suite.py`](../bench/run_locust_suite.py) and [`b
 
 | Endpoint | Requests | Failures | Avg (ms) | Median (ms) | p95 (ms) | p99 (ms) | Max (ms) | Throughput (req/s) |
 |---|---|---|---|---|---|---|---|---|
-| `POST /api/search [keyword]` | 22,573 | 0 (0.00%) | 226.25 | 230.0 | 460.0 | 550.0 | 6,893.6 | 188.75 |
-| `GET /api/stats` | 2,284 | 0 (0.00%) | 154.35 | 150.0 | 390.0 | 460.0 | 6,392.9 | 19.10 |
-| `GET /api/health` | 2,342 | 0 (0.00%) | 156.95 | 160.0 | 390.0 | 470.0 | 3,569.6 | 19.58 |
-| **Aggregated (peak 150 users)** | **27,199** | **0 (0.00%)** | **214.25** | **210.0** | **450.0** | **540.0** | **6,893.6** | **227.44** *(peak 279.4)* |
+| `POST /api/search [keyword]` | 21,132 | 0 (0.00%) | 248.78 | 240.0 | 520.0 | 640.0 | 8,316.9 | 176.52 |
+| `GET /api/stats` | 2,131 | 0 (0.00%) | 180.54 | 160.0 | 440.0 | 550.0 | 8,633.3 | 17.80 |
+| `GET /api/health` | 2,152 | 0 (0.00%) | 181.35 | 170.0 | 450.0 | 550.0 | 8,353.2 | 17.98 |
+| **Aggregated (peak 150 users)** | **25,415** | **0 (0.00%)** | **237.34** | **230.0** | **510.0** | **630.0** | **8,633.3** | **212.30** *(peak 253.6)* |
 
 ![Locust Sustained Load Test](../bench/results/locust_load_test.png)
 
@@ -89,16 +86,16 @@ Executed via [`bench/run_locust_suite.py`](../bench/run_locust_suite.py) and [`b
 
 | Endpoint | Requests | Failures | Avg (ms) | Median (ms) | p95 (ms) | p99 (ms) | Max (ms) | Throughput (req/s) |
 |---|---|---|---|---|---|---|---|---|
-| `POST /api/search [keyword]` | 14,248 | 0 (0.00%) | 502.33 | 370.0 | 610.0 | 6,200.0 | 27,405.3 | 129.81 |
-| `GET /api/stats` | 1,384 | 18 (1.30%) | 413.80 | 300.0 | 540.0 | 10,000.0 | 10,324.5 | 12.61 |
-| `GET /api/health` | 1,455 | 23 (1.58%) | 456.24 | 300.0 | 540.0 | 10,000.0 | 10,329.0 | 13.26 |
-| **Aggregated (peak 250 users)** | **17,087** | **41 (0.24%)** | **491.23** | **360.0** | **610.0** | **7,800.0** | **27,405.3** | **155.67** *(peak 277.3)* |
+| `POST /api/search [keyword]` | 13,179 | 0 (0.00%) | 558.42 | 400.0 | 730.0 | 7,200.0 | 27,984.6 | 119.92 |
+| `GET /api/stats` | 1,320 | 17 (1.29%) | 433.56 | 310.0 | 640.0 | 10,000.0 | 10,296.1 | 12.01 |
+| `GET /api/health` | 1,325 | 14 (1.06%) | 437.00 | 330.0 | 640.0 | 10,000.0 | 10,271.8 | 12.06 |
+| **Aggregated (peak 250 users)** | **15,824** | **31 (0.20%)** | **537.84** | **380.0** | **720.0** | **8,100.0** | **27,984.6** | **143.99** *(peak 250.3)* |
 
 ![Locust Traffic Spike and Recovery Test](../bench/results/locust_spike_test.png)
 
 ### Observations
-- **Sustained load stability:** Under a stepped ramp reaching 150 concurrent Locust users, the server handled `27,199` mixed requests with **`0` failures (`0.00%`)**, peaking at **`279.4 req/s`**.
-- **Spike resilience & clean recovery:** During instantaneous bursts from `10 → 200` and `10 → 250` users (`spawn_rate = 100–125/s`), all `14,248` search requests succeeded (`0.00%` error rate). Only `41` lightweight `/api/stats` and `/api/health` checks (`0.24%` overall) exceeded Locust's `10 s` client timeout (`HTTP 0` in `locust_spike_failures.csv`) during the initial connection-storm queue buildup (and `/api/health` additionally performs a synchronous Ollama check). As soon as user load returned to `10` baseline users after each spike, p50/p95 latency recovered back to `~50 ms / ~80 ms` within seconds with zero server crashes or dropped states.
+- **Sustained load stability:** Under a stepped ramp reaching 150 concurrent Locust users, the server handled `25,415` mixed requests with **`0` failures (`0.00%`)**, peaking at **`253.6 req/s`**.
+- **Spike resilience & clean recovery:** During instantaneous bursts from `10 → 200` and `10 → 250` users (`spawn_rate = 100–125/s`), all `13,179` search requests succeeded (`0.00%` error rate). Only `31` lightweight `/api/stats` and `/api/health` checks (`0.20%` overall) exceeded Locust's `10 s` client timeout (`HTTP 0` in `locust_spike_failures.csv`) during the initial connection-storm queue buildup (and `/api/health` additionally performs a synchronous Ollama check). As soon as user load returned to `10` baseline users after each spike, p50/p95 latency recovered back to `~50 ms / ~80 ms` within seconds with zero server crashes or dropped states.
 
 ---
 
@@ -108,34 +105,27 @@ Evaluated against the `200,001`-chunk corpus via `POST /api/search` (`mode="keyw
 
 | Test Query | Expected Result | Actual Top Result | Score | Top-3 Doc IDs | Server Time (ms) | Status |
 |---|---|---|---|---|---|---|
-| `divine comedy inferno` | Dante's Divine Comedy / Inferno chunks | `1003_40` — Dante's Paradise [Divine Comedy] | 1.000 | `1003_40, 1004_116, 1893_36` | 50 | PASS |
-| `sherlock holmes detective` | Arthur Conan Doyle Sherlock Holmes stories | `244_16` — A Study In Scarlet | 1.000 | `244_16, 2852_15, 716_43` | 42 | PASS |
-| `french revolution guillotine` | Historical or literary texts on the French Revolution | `2580_92` — The Origins of Contemporary France, Volume 4 (of 6) | 1.000 | `2580_92, 2168_99, 1359_16` | 20 | PASS |
-| `moses pharaoh egypt exodus` | King James Bible (Exodus / Moses) | `1494_111` — The Legends of the Jews Volume 2 | 1.000 | `1494_111, 1494_74, 1494_2` | 36 | PASS |
-| `alice wonderland white rabbit` | Lewis Carroll's Alice in Wonderland | `114_0` — Tenniel Illustrations for Alice in Wonderland | 1.000 | `114_0, 11_26, 11_0` | 48 | PASS |
-| `xqzvnonexistentkplm` | Empty result set (no matches) | (empty) | — | — | 4 | PASS |
+| `divine comedy inferno` | Dante's Divine Comedy / Inferno chunks | `1003_40` — Dante's Paradise [Divine Comedy] | 1.000 | `1003_40, 1004_116, 1893_36` | 55 | PASS |
+| `sherlock holmes detective` | Arthur Conan Doyle Sherlock Holmes stories | `244_16` — A Study In Scarlet | 1.000 | `244_16, 2852_15, 716_43` | 37 | PASS |
+| `french revolution guillotine` | Historical or literary texts on the French Revolution | `2580_92` — The Origins of Contemporary France, Volume 4 (of 6) | 1.000 | `2580_92, 2168_99, 1359_16` | 47 | PASS |
+| `moses pharaoh egypt exodus` | King James Bible (Exodus / Moses) | `1494_111` — The Legends of the Jews Volume 2 | 1.000 | `1494_111, 1494_74, 1494_2` | 41 | PASS |
+| `alice wonderland white rabbit` | Lewis Carroll's Alice in Wonderland | `114_0` — Tenniel Illustrations for Alice in Wonderland | 1.000 | `114_0, 11_26, 11_0` | 24 | PASS |
+| `xqzvnonexistentkplm` | Empty result set (no matches) | (empty) | — | — | 3 | PASS |
 | `the and of in` | Empty result set (stop words only) | (empty) | — | — | 0 | PASS |
 
 - Replacing raw `tf / |d|` normalization with Okapi BM25 length saturation ($b = 0.75$) prevented short 50-word tail chunks from outranking full multi-term chapters (e.g. `"divine comedy inferno"` now ranks Dante's *Divine Comedy* #1 instead of a short verse anthology tail chunk).
 - On `"moses pharaoh egypt exodus"`, Louis Ginzberg's *The Legends of the Jews Volume 2* (`1494.txt`) ranks #1 because it concentrates all four Exodus terms densely within single 1,000-word chunks.
-
-### Live CLI Verification (`./search`)
-- **REST Keyword (`python search "divine comedy inferno" --limit 5`):** returned `1003_40` (`1.000`), `1004_116` (`0.963`), `1893_36` (`0.957`), `999_34` (`0.953`), `1001_0` (`0.922`) in **`33 ms`**.
-- **WebSocket Streaming (`python search "divine comedy inferno" --mode stream --limit 5`):**
-  - `[query_expansion] expanded_terms=['comic']`
-  - `[keyword_search] 5 result(s) in 20 ms` (same top-5 ranking led by `1003_40`)
-  - `[done]`
 
 ---
 
 ## 6. Parallelism Bottleneck Analysis
 
 1. **Amdahl's Law & Thread Oversubscription ($16\text{–}128$ Threads):**
-   Using $S(8) = 4.275$, Amdahl's law $S(N) = \frac{1}{s + (1 - s)/N}$ yields an effective serial/contention fraction of $s \approx 12.4\%$ for the batched pipeline. Serial phases include recursive directory traversal, LPT sorting, `ThreadPool` setup/teardown, `shrinkToFit()`, `DocumentStore::seal()`, `activeSnapshot` swap, and `malloc_trim(0)`. Above 16 threads, OS thread scheduling/context-switching overhead outweighs any remaining CPU parallelism on a 16-logical-core host, flattening build time around `40–45 s` up to 128 threads.
+   Using $S(8) = 4.729$, Amdahl's law $S(N) = \frac{1}{s + (1 - s)/N}$ yields an effective serial/contention fraction of $s \approx 9.9\%$ for the batched pipeline. Serial phases include recursive directory traversal, LPT sorting, `ThreadPool` setup/teardown, `shrinkToFit()`, `DocumentStore::seal()`, `activeSnapshot` swap, and `malloc_trim(0)`. Above 16 threads, OS thread scheduling/context-switching overhead outweighs any remaining CPU parallelism on a 16-logical-core host, flattening build time around `17–19 s` up to 128 threads.
 2. **Disk I/O & Container Bind-Mount Overhead:**
    Reading `2,808` files (`1.587 GiB`) from a Windows bind mount (`./data:/data:ro`) into Docker Desktop WSL2 traverses cross-VM filesystem translation (9p/drvfs), while Top-$K$ snippet extraction performs $K$ random file seeks per search request.
-3. **Bucket Write Contention & Allocator Arenas:**
-   - *Indexing:* LPT file scheduling and 16-chunk batching (`addBatch` + `addPostingBatch`) cut `DocumentStore::mtx` lock acquisitions by ~16× and eliminated straggler files. However, high-frequency English terms still collide across the 64 buckets under 16–128 concurrent writers, and capping `MALLOC_ARENA_MAX=16` (to stay safely inside the `7.569 GiB` container memory limit) introduces glibc arena synchronization when 32–128 threads allocate simultaneously.
-   - *Searching:* Sealing `DocumentStore` (`seal()`) enabled lock-free reads for `getTokenCount()`, `getDocId()`, and `getAverageTokenCount()`. Combined with zero-copy `visitPostings()` and a `thread_local` sparse `scoreBuffer`, reader contention was largely eliminated, raising peak search throughput by **+68%** (`143 → 240.5 req/s`) and bringing 1–16 client p95 latency under `90 ms`. The remaining read overhead is cache-line traffic on per-bucket `std::shared_mutex` reader counts and Top-$K$ disk seeks.
+3. **Bucket Write Contention & Custom Allocator Paths:**
+   - *Indexing:* LPT file scheduling, 16-chunk batching (`addBatch` + `addPostingBatch`), geometric `DocumentStore` capacity growth, and using standard `::operator new` / `tcache` for normally aligned allocations (`HashMap` with SplitMix64 bit mixing + `DynamicArray`) cut 1-thread time to `103.7 s` and 8-thread time to `21.93 s`. Above 16 threads, high-frequency English terms still collide across the 64 buckets, and bounding glibc arenas (`MALLOC_ARENA_MAX=16`) trades extreme 64–128 thread allocation parallelism for a compact `2.837 GiB` RSS footprint.
+   - *Searching:* Sealing `DocumentStore` (`seal()`) enables lock-free reads for `getTokenCount()`, `getDocId()`, and `getAverageTokenCount()`. Combined with zero-copy `visitPostings()` on `DynamicArray<Posting>` and a `thread_local` sparse `scoreBuffer`, peak throughput reaches `225.3 req/s` (`91.78 ms` p95 at 16 clients). The remaining read overhead is cache-line traffic on per-bucket `std::shared_mutex` reader counts, linear probing inside large open-addressing buckets, and Top-$K$ disk seeks.
 4. **Sequential Ollama LLM Worker Impact on WebSocket Throughput:**
-   `OllamaService` intentionally serializes all `/api/generate` calls through a **1-thread `ThreadPool`** to avoid exhausting CPU/RAM with concurrent LLM inference. While `WebSocketSession` posts completion via `net::post(strand)` without blocking the 16 network I/O threads (keeping REST search throughput unaffected at `~240 req/s`), concurrent WebSocket throughput remains bounded by sequential Ollama generation latency.
+   `OllamaService` intentionally serializes all `/api/generate` calls through a **1-thread `ThreadPool`** to avoid exhausting CPU/RAM with concurrent LLM inference. While `WebSocketSession` posts completion via `net::post(strand)` without blocking the 16 network I/O threads (keeping REST search throughput unaffected at `~225 req/s`), concurrent WebSocket throughput remains bounded by sequential Ollama generation latency.

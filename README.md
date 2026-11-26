@@ -3,7 +3,8 @@
 A containerized, multi-threaded search engine in C++20 with parallel inverted index construction, striped locking, Okapi BM25 ranking, REST & WebSocket streaming APIs, and local LLM query expansion via Ollama. Coursework for *Parallel Computing* (KPI, IASA, 2026) completed by Dolzhenkov Yehor KN-32.
 
 - **Custom `ThreadPool` & `TaskQueue`:** Built from scratch on `std::thread`, `std::mutex`, and `std::condition_variable` with `std::future` support, serialized `stop()` synchronization, and single-source-of-truth queue state.
-- **Custom `ConcurrentInvertedIndex` & Sealed `DocumentStore`:** Striped locking across 64 cache-aligned `std::shared_mutex` buckets, LPT file scheduling, 16-chunk batched ingestion (`addBatch` / `addPostingBatch`), and lock-free reads once `DocumentStore::seal()` completes.
+- **Custom Templated Containers (`DynamicArray<T>`, `HashMap<Key, Value>`):** Implemented from scratch on raw heap arrays (Rule of Five, SplitMix64 bit-mixed open addressing with tombstones, geometric growth, exception safety) powering the inverted index, document store, and term-frequency counting.
+- **Custom `ConcurrentInvertedIndex` & Sealed `DocumentStore`:** Striped locking across 64 cache-aligned `std::shared_mutex` buckets storing `HashMap<std::string, DynamicArray<Posting>>`, LPT file scheduling, 16-chunk batched ingestion (`addBatch` / `addPostingBatch`), and lock-free reads once `DocumentStore::seal()` completes.
 - **Atomic Snapshot Isolation & Okapi BM25 Search:** Index rebuilds swap `std::atomic<std::shared_ptr<const IndexSnapshot>>` without blocking active readers; searches use zero-copy `visitPostings()`, a `thread_local` sparse score accumulator, and Okapi BM25 ($k_1 = 1.2, b = 0.75$) normalized to `[0, 1]`.
 - **Local LLM Query Expansion:** Sequential 1-thread Ollama worker (`/api/generate`) with clean in-flight cancellation on shutdown enriches queries with keywords and synonyms, streaming pipeline stages over `/ws/search`.
 - **Dual Clients:** Interactive Web UI (Nginx + vanilla JS) and Python CLI client (`./search`).
@@ -98,13 +99,13 @@ curl http://localhost:8080/api/health
 curl -X POST http://localhost:8080/api/index \
   -H "Content-Type: application/json" \
   -d '{"threads": 8}'
-# {"documents_indexed":200001,"status":"ok","time_ms":37038}
+# {"documents_indexed":200001,"status":"ok","time_ms":21930}
 ```
 
 ### Get Index Statistics
 ```bash
 curl http://localhost:8080/api/stats
-# {"documents":200001,"index_build_time_ms":37038,"threads_used":8}
+# {"documents":200001,"index_build_time_ms":21930,"threads_used":8}
 ```
 
 ### Keyword Search (REST)
@@ -136,7 +137,7 @@ On Windows, run with `python search "divine comedy inferno"`.
 
 ## Building & Testing
 
-### Via Docker (`test` target: `clang-format` + 30 Release GoogleTests + 30 ThreadSanitizer Tests)
+### Via Docker (`test` target: `clang-format` + 38 Release GoogleTests + 38 ThreadSanitizer Tests)
 ```bash
 docker build --target test -t cse-test --progress=plain .
 docker run --rm --security-opt seccomp=unconfined cse-test
@@ -195,6 +196,7 @@ Measured scalability results (`1–128` threads), Locust load/spike performance,
 ├── src/
 │   ├── Source.cpp                # Application entry point
 │   ├── Config/                   # Environment configuration
+│   ├── Containers/               # Custom templated DynamicArray<T> and HashMap<Key, Value>
 │   ├── ThreadPool/               # Custom TaskQueue & ThreadPool
 │   ├── Index/                    # Tokenizer, DocumentStore, ConcurrentInvertedIndex, IndexerService
 │   ├── Search/                   # Okapi BM25 SearchEngine & snippet extractor

@@ -49,7 +49,7 @@ See Section 11 (Glossary). Primary references:
 ### 3.2 Design Constraints
 - **CON-1:** The backend MUST be written in a compiled language (C++).
 - **CON-2:** The thread pool (`ThreadPool`) MUST be implemented from scratch on top of `std::thread`, `std::mutex`, `std::condition_variable`. Using `std::async`, OpenMP, TBB, Boost thread pools or similar ready-made executors for indexing is prohibited.
-- **CON-3:** The inverted index data structure with concurrent access MUST be implemented from scratch. Ready-made concurrent containers (TBB, folly, libcds, etc.) are prohibited. Standard containers (`std::unordered_map`, `std::vector`) and synchronization primitives (`std::shared_mutex`, `std::atomic`) are allowed as building blocks.
+- **CON-3:** The inverted index data structure with concurrent access and its underlying containers (`DynamicArray<T>`, `HashMap<Key, Value, Hash, KeyEqual>`) MUST be implemented from scratch over raw heap arrays using C++ templates. Ready-made concurrent containers (TBB, folly, libcds, etc.) and STL containers (`std::unordered_map`, `std::vector`) inside `ConcurrentInvertedIndex` and `DocumentStore` are prohibited; only standard synchronization primitives (`std::shared_mutex`, `std::atomic`) and low-level memory primitives (`::operator new` / placement new / `std::launder`) are used as building blocks.
 - **CON-4:** Third-party libraries are allowed only for networking (Boost.Beast/Asio), JSON (nlohmann/json) and testing (GoogleTest).
 - **CON-5:** The REST API and WebSocket message formats are a **fixed contract** (Section 6) and MUST NOT be changed. Optional extra fields are allowed only where explicitly stated.
 - **CON-6:** The two clients MUST use two different approaches: a web application and a console application.
@@ -65,10 +65,11 @@ See Section 11 (Glossary). Primary references:
 | `ClientSession` / `WebSocketSession` | Boost.Beast HTTP and WebSocket session handlers |
 | `RequestHandler` | REST routing, request validation, JSON serialization, owns the active index snapshot |
 | `ThreadPool` / `TaskQueue` | Custom fixed-size pool of worker threads with a thread-safe `TaskQueue`, serialized `stop()` synchronization, and `std::future` support |
-| `IndexerService` | Recursively scans the dataset, sorts files LPT-descending by size, strips Gutenberg markers, batches up to 16 chunks, distributes tasks across an Indexer `ThreadPool` with $N$ threads, and seals the snapshot |
-| `Tokenizer` | Text normalization: lowercase, strip punctuation/digits, stop-word filtering |
-| `ConcurrentInvertedIndex` | Custom thread-safe inverted index with striped locking, `addPostingBatch`, `visitPostings`, and `shrinkToFit` (Section 7.1) |
-| `DocumentStore` | Thread-safe registry of document metadata (`docId`, `filePath`, `byteOffset`, `byteLength`, `tokenCount`) supporting `addBatch` and lock-free reads once `seal()` is called |
+| `DynamicArray<T>` / `HashMap<K, V>` | Custom templated containers built from scratch on raw heap arrays (Rule of Five, SplitMix64 bit-mixed open addressing with tombstones, geometric growth, exception safety) |
+| `IndexerService` | Recursively scans the dataset, sorts files LPT-descending by size, strips Gutenberg markers, batches up to 16 chunks into `DynamicArray`/`HashMap` buffers, distributes tasks across an Indexer `ThreadPool` with $N$ threads, and seals the snapshot |
+| `Tokenizer` | Text normalization: lowercase, strip punctuation/digits, stop-word filtering, direct `HashMap<std::string, uint32_t>` frequency accumulation |
+| `ConcurrentInvertedIndex` | Custom thread-safe inverted index storing `HashMap<std::string, DynamicArray<Posting>>` per striped bucket with `addPostingBatch`, zero-copy `visitPostings`, and `shrinkToFit` (Section 7.1) |
+| `DocumentStore` | Thread-safe registry of document metadata (`docId`, `filePath`, `byteOffset`, `byteLength`, `tokenCount`) stored in `DynamicArray<DocumentMeta>`, supporting `addBatch` with geometric growth and lock-free reads once `seal()` is called |
 | `SearchEngine` | Executes keyword search over an index snapshot using zero-copy `visitPostings`, thread-local sparse score buffers, Okapi BM25 scoring, and Top-K snippets |
 | `OllamaService` | HTTP client for Ollama; query expansion via `/api/generate`; availability check; 1-thread worker queue with immediate in-flight cancellation via `stop()` |
 | `Config` | Parses environment variables into server, dataset, index, and Ollama settings |
@@ -210,9 +211,9 @@ Allowed extensions: `"error"` field inside `query_expansion.data` (fallback, UC-
 ## 7. Concurrency Model
 
 ### 7.1 Concurrent Inverted Index: Striped Locking
-The `ConcurrentInvertedIndex` is divided into a fixed number of buckets (default $B = 64$, configurable, power of two). Each bucket contains its own `std::unordered_map<std::string, std::vector<Posting>>` protected by its own `std::shared_mutex`, where `Posting = {uint32_t doc_id; uint32_t tf;}`.
-- **Write (indexing):** A worker builds a local `term → tf` map per chunk, accumulates up to 16 chunks into a `MetaBatch` and `BatchPosting` buffer, appends metadata under one `DocumentStore::addBatch` lock, groups batch entries by bucket $i = \text{hash}(term) \bmod B$, and acquires `std::unique_lock` on each affected bucket in ascending order $0 \dots B-1$. At most one bucket lock is held at any time, which rules out deadlocks.
-- **Read (searching):** Readers invoke `visitPostings` under a `std::shared_lock` on the buckets of query terms (zero posting-vector copy) and read `DocumentStore` lock-free once `seal()` has run; multiple searches proceed in parallel.
+The `ConcurrentInvertedIndex` stores a `DynamicArray<std::unique_ptr<Bucket>>` with a fixed number of buckets (default $B = 64$, configurable, power of two). Each bucket contains its own custom open-addressing `HashMap<std::string, DynamicArray<Posting>>` protected by its own `std::shared_mutex`, where `Posting = {uint32_t doc_id; uint32_t tf;}`.
+- **Write (indexing):** A worker builds a local `HashMap<std::string, uint32_t>` (`term → tf`) per chunk, accumulates up to 16 chunks into `DynamicArray<DocumentMeta>` and `DynamicArray<BatchPosting>` buffers, appends metadata under one `DocumentStore::addBatch` lock (with geometric capacity reserve), groups batch entries by bucket $i = \text{hash}(term) \bmod B$ in `DynamicArray` buffers, and acquires `std::unique_lock` on each affected bucket in ascending order $0 \dots B-1$. At most one bucket lock is held at any time, which rules out deadlocks.
+- **Read (searching):** Readers invoke `visitPostings` under a `std::shared_lock` on the buckets of query terms (zero posting-array copy) and read `DocumentStore` lock-free once `seal()` has run; multiple searches proceed in parallel.
 - **Document frequency** is derived from the posting list length; the global document count is a `std::atomic<uint32_t>`.
 
 ### 7.2 Thread Pools
@@ -295,7 +296,7 @@ where $|d|$ is the token count of document $d$, $N$ — total documents, $df_t$ 
 
 ### 10.3 Code Quality and Maintainability
 - **NFR-Q1:** C++ code follows a unified Microsoft/Allman style (`PascalCase` files/classes, `camelCase` methods/variables, 4-space indentation, Allman braces, max 120 columns) enforced with `clang-format` (`.clang-format` in the repo). Python scripts are syntax-checked in CI and tested via `unittest`.
-- **NFR-Q2:** Unit tests cover `ThreadPool`, `Tokenizer`, `ConcurrentInvertedIndex`, `DocumentStore`, BM25 ranking, `RequestHandler`, `OllamaService`, `WebSocketSession` (GoogleTest + ThreadSanitizer), and the Python CLI (`tests/test_cli.py`). Concurrency tests stress writers, readers, pause/resume, concurrent `stop()`, and in-flight shutdown under TSan.
+- **NFR-Q2:** Unit tests cover `DynamicArray`, `HashMap`, `ThreadPool`, `Tokenizer`, `ConcurrentInvertedIndex`, `DocumentStore`, BM25 ranking, `RequestHandler`, `OllamaService`, `WebSocketSession` (38 GoogleTest cases + ThreadSanitizer), and the Python CLI (`tests/test_cli.py`). Concurrency tests stress writers, readers, pause/resume, concurrent `stop()`, and in-flight shutdown under TSan.
 - **NFR-Q3:** CI (GitHub Actions) builds the project, runs tests normally and under ThreadSanitizer, and checks formatting.
 - **NFR-Q4:** A search quality table is produced: test query, expected result, actual result (required by the report).
 

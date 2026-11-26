@@ -50,7 +50,7 @@ else valid query
     loop For each weighted term
         Engine -> Index : visitPostings(term, visitor)
         activate Index
-        note right: shared_lock on bucket;\nzero posting vector copy
+        note right: shared_lock on bucket;\nzero posting array copy
         Index -> Docs : getTokenCount(docId) (lock-free)
         Index --> Engine : accumulate BM25 in thread_local buffer
         deactivate Index

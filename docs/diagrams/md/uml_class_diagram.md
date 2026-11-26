@@ -53,12 +53,50 @@ class ThreadPool {
   + ~ThreadPool()
 }
 
+class "DynamicArray<T>" as DynamicArray {
+  - dataPtr: T*
+  - count: size_t
+  - cap: size_t
+  + pushBack(value): void
+  + emplaceBack(args): T&
+  + popBack(): void
+  + reserve(newCap: size_t): void
+  + shrinkToFit(): void
+  + resize(newSize: size_t): void
+  + assign(newSize: size_t, value): void
+  + clear(): void
+  + operator[](index: size_t): T&
+  + at(index: size_t): T&
+  + size(): size_t
+  + capacity(): size_t
+}
+
+class "HashMap<Key, Value, Hash, KeyEqual>" as HashMap {
+  - states: SlotState*
+  - slots: Slot*
+  - count: size_t
+  - tombstones: size_t
+  - cap: size_t
+  + find(key: Key): Iterator
+  + contains(key: Key): bool
+  + at(key: Key): Value&
+  + operator[](key: Key): Value&
+  + tryEmplace(key: Key, args): pair<Iterator, bool>
+  + insertOrAssign(key: Key, value: Value): pair<Iterator, bool>
+  + erase(key: Key): bool
+  + reserve(expectedCount: size_t): void
+  + clear(): void
+  + size(): size_t
+  + capacity(): size_t
+  + loadFactor(): double
+}
+
 class Tokenizer {
   - stopWords: unordered_set<string_view>
   + Tokenizer()
   + isStopWord(token: string_view): bool
   + tokenize(text: string_view): vector<string>
-  + tokenizeToTermFreq(text: string_view, termFreq: unordered_map<string, uint32_t>&): uint32_t
+  + tokenizeToTermFreq(text: string_view, termFreq: HashMap<string, uint32_t>&): uint32_t
 }
 
 class Posting <<struct>> {
@@ -74,18 +112,18 @@ class BatchPosting <<struct>> {
 
 class Bucket <<struct>> {
   + mtx: std::shared_mutex
-  + postings: unordered_map<string, vector<Posting>>
+  + postings: HashMap<string, DynamicArray<Posting>>
 }
 
 class ConcurrentInvertedIndex {
   - numBuckets: size_t
-  - buckets: vector<unique_ptr<Bucket>>
+  - buckets: DynamicArray<unique_ptr<Bucket>>
   - documentCount: atomic<uint32_t>
   + ConcurrentInvertedIndex(bucketCount: size_t = 64)
-  + addDocument(docId: uint32_t, termFreq: unordered_map<string, uint32_t>): void
-  + addPostingBatch(baseDocId: uint32_t, docCount: uint32_t, entries: vector<BatchPosting>): void
-  + getPostings(term: string): vector<Posting>
-  + visitPostings(term: string, visitor: function<void(const vector<Posting>&)>): void
+  + addDocument(docId: uint32_t, termFreq: HashMap<string, uint32_t>): void
+  + addPostingBatch(baseDocId: uint32_t, docCount: uint32_t, entries: DynamicArray<BatchPosting>): void
+  + getPostings(term: string): DynamicArray<Posting>
+  + visitPostings(term: string, visitor: function<void(const DynamicArray<Posting>&)>): void
   + shrinkToFit(): void
   + getDocumentCount(): uint32_t
   + getTermCount(): size_t
@@ -103,11 +141,11 @@ class DocumentMeta <<struct>> {
 
 class DocumentStore {
   - mtx: std::shared_mutex
-  - docs: vector<DocumentMeta>
+  - docs: DynamicArray<DocumentMeta>
   - totalTokens: uint64_t
   - sealed: atomic<bool>
   + add(meta: DocumentMeta): uint32_t
-  + addBatch(batch: vector<DocumentMeta>&): uint32_t
+  + addBatch(batch: DynamicArray<DocumentMeta>&): uint32_t
   + seal(): void
   + isSealed(): bool
   + get(internalId: uint32_t): DocumentMeta
@@ -223,9 +261,14 @@ class SearchServer {
 
 ThreadPool *-- TaskQueue : owns >
 ConcurrentInvertedIndex *-- Bucket : contains >
+ConcurrentInvertedIndex *-- DynamicArray : stores buckets >
 ConcurrentInvertedIndex ..> BatchPosting : ingests >
+Bucket *-- HashMap : owns >
+Bucket *-- DynamicArray : posting lists >
 Bucket o-- Posting : stores >
 DocumentStore *-- DocumentMeta : stores >
+DocumentStore *-- DynamicArray : stores metadata >
+Tokenizer ..> HashMap : populates >
 IndexSnapshot *-- ConcurrentInvertedIndex
 IndexSnapshot *-- DocumentStore
 IndexSnapshot *-- IndexStats

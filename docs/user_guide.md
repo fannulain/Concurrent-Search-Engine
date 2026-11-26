@@ -133,8 +133,8 @@ Exit status is `0` on success and non-zero (`1`) on validation, HTTP, or connect
 | Method & Path | Request Body | Example Response | Status Codes |
 |---|---|---|---|
 | `GET /api/health` | — | `{"ollama":true,"status":"ok"}` | `200` |
-| `POST /api/index` | `{"threads": 8}` (`1..128`) | `{"documents_indexed":200001,"status":"ok","time_ms":37038}` | `200`, `400`, `409`, `500` |
-| `GET /api/stats` | — | `{"documents":200001,"index_build_time_ms":37038,"threads_used":8}` | `200` |
+| `POST /api/index` | `{"threads": 8}` (`1..128`) | `{"documents_indexed":200001,"status":"ok","time_ms":21930}` | `200`, `400`, `409`, `500` |
+| `GET /api/stats` | — | `{"documents":200001,"index_build_time_ms":21930,"threads_used":8}` | `200` |
 | `POST /api/search` | `{"query":"inferno","mode":"keyword","limit":10}` | `{"results":[{"doc_id":"1003_40","score":1.0,"snippet":"..."}],"time_ms":18}` | `200`, `400` |
 | `WS /ws/search` | `{"query":"inferno","limit":10}` | Streams `query_expansion`, `keyword_search`, `done` (or `error`) frames | `101`, `404` |
 
@@ -159,7 +159,7 @@ docker build --target test -t cse-test --progress=plain .
 docker run --rm --security-opt seccomp=unconfined cse-test
 ```
 
-This verifies `clang-format --dry-run --Werror`, builds and runs all 30 Release GoogleTest cases, and runs all 30 tests under Clang ThreadSanitizer (`-fsanitize=thread`).
+This verifies `clang-format --dry-run --Werror`, builds and runs all 38 Release GoogleTest cases (including `ContainersTest`), and runs all 38 tests under Clang ThreadSanitizer (`-fsanitize=thread`).
 
 ### Local Linux Build & Test (Ubuntu 24.04)
 
